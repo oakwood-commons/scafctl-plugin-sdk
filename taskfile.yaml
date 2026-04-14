@@ -143,7 +143,7 @@ tasks:
         }
 
         install_tool golangci-lint "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@{{.GOLANGCI_LINT_VERSION}}"
-        install_tool benchstat "golang.org/x/perf/cmd/benchstat@v0.0.0-20250414042347-52cb78c36887"
+        install_tool benchstat "golang.org/x/perf/cmd/benchstat@latest"
         install_tool govulncheck "golang.org/x/vuln/cmd/govulncheck@{{.GOVULNCHECK_VERSION}}"
         install_tool gofumpt "mvdan.cc/gofumpt@{{.GOFUMPT_VERSION}}"
         install_tool goimports "golang.org/x/tools/cmd/goimports@{{.GOIMPORTS_VERSION}}"
