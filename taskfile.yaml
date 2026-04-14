@@ -422,3 +422,32 @@ tasks:
       - task: test:race
       - task: coverage:check
       - task: vulncheck
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # Release Validation
+  # ──────────────────────────────────────────────────────────────────────────────
+
+  release:validate:
+    desc: "Validate release workflow locally using act (dry-run)"
+    silent: true
+    deps: [release:check-act]
+    cmds:
+      - |
+        set -e
+        echo "Validating release workflow (dry-run)..."
+        act push \
+          --workflows .github/workflows/release.yml \
+          --eventpath /dev/stdin \
+          -n <<< '{"ref":"refs/tags/v0.0.0-validate"}'
+        echo "Release workflow validation passed"
+
+  release:check-act:
+    desc: "Check that act is installed"
+    silent: true
+    internal: true
+    preconditions:
+      - sh: command -v act
+        msg: |
+          'act' is not installed. Install it with:
+            brew install act
+          See https://github.com/nektos/act
