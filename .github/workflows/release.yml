@@ -44,7 +44,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install git-cliff
-        uses: kenji-miyake/setup-git-cliff@e22b0685884cef1a609d682e858e4db642e4c84c # v2.0.1
+        uses: kenji-miyake/setup-git-cliff@2778609c643a39a2576c4bae2e493b855eb4aee8 # v2.0.1
         with:
           version: '2.x'
           token: ${{ secrets.GITHUB_TOKEN }}
