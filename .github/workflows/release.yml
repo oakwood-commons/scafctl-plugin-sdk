@@ -46,7 +46,7 @@ jobs:
       - name: Install git-cliff
         uses: kenji-miyake/setup-git-cliff@2778609c643a39a2576c4bae2e493b855eb4aee8 # v2.0.1
         with:
-          version: '2.x'
+          version: '2.12.0'
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate changelog

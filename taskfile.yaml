@@ -428,13 +428,37 @@ tasks:
   # ──────────────────────────────────────────────────────────────────────────────
 
   release:validate:
-    desc: "Validate release workflow locally using act (dry-run)"
+    desc: "Validate release workflow locally (act dry-run + dependency checks)"
     silent: true
     deps: [release:check-act]
     cmds:
       - |
         set -e
-        echo "Validating release workflow (dry-run)..."
+
+        echo "Checking workflow action pins..."
+        # Extract pinned action refs and verify they resolve
+        grep 'uses:' .github/workflows/release.yml | sed 's/.*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | sed 's/[[:space:]]*$//' | while read -r action; do
+          repo=$(echo "$action" | cut -d@ -f1)
+          ref=$(echo "$action" | cut -d@ -f2)
+          if ! gh api "repos/$repo/commits/$ref" --silent 2>/dev/null; then
+            echo "ERROR: cannot resolve $action"
+            exit 1
+          fi
+        done
+        echo "  All action pins valid"
+
+        echo "Checking git-cliff release asset..."
+        # Verify the git-cliff version referenced in the workflow has a real release
+        cliff_ver=$(grep -A2 'setup-git-cliff' .github/workflows/release.yml | grep 'version:' | head -1 | sed "s/.*version:[[:space:]]*['\"]*//;s/['\"]*$//")
+        if [ -n "$cliff_ver" ]; then
+          if ! gh api "repos/orhun/git-cliff/releases/tags/v${cliff_ver}" --silent 2>/dev/null; then
+            echo "ERROR: git-cliff release v${cliff_ver} not found"
+            exit 1
+          fi
+          echo "  git-cliff v${cliff_ver} exists"
+        fi
+
+        echo "Running act dry-run..."
         act push \
           --workflows .github/workflows/release.yml \
           --eventpath /dev/stdin \
