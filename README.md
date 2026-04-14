@@ -1,5 +1,13 @@
 # scafctl-plugin-sdk
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/oakwood-commons/scafctl-plugin-sdk)](https://goreportcard.com/report/github.com/oakwood-commons/scafctl-plugin-sdk)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/oakwood-commons/scafctl-plugin-sdk)](https://github.com/oakwood-commons/scafctl-plugin-sdk/releases)
+[![CI](https://github.com/oakwood-commons/scafctl-plugin-sdk/actions/workflows/test.yml/badge.svg)](https://github.com/oakwood-commons/scafctl-plugin-sdk/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/oakwood-commons/scafctl-plugin-sdk/graph/badge.svg)](https://codecov.io/gh/oakwood-commons/scafctl-plugin-sdk)
+[![Go Reference](https://pkg.go.dev/badge/github.com/oakwood-commons/scafctl-plugin-sdk.svg)](https://pkg.go.dev/github.com/oakwood-commons/scafctl-plugin-sdk)
+[![Documentation](https://img.shields.io/badge/docs-plugin%20tutorial-blue)](https://oakwood-commons.github.io/scafctl/tutorials/plugin-development/)
+
 Lightweight Go SDK for building [scafctl](https://github.com/oakwood-commons/scafctl)
 plugins. Plugin authors import this module instead of the full scafctl module,
 keeping plugin binaries small and dependency-free of host-only packages
@@ -131,4 +139,3 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 Apache License 2.0 -- see [LICENSE](LICENSE).
-Lightweight SDK for building scafctl plugins (providers and auth handlers)

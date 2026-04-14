@@ -4,6 +4,9 @@
 *.dll
 *.so
 *.dylib
+**.tar.gz
+**.sha256
+**.zip
 
 # Test binary, built with `go test -c`
 *.test
@@ -30,3 +33,9 @@ go.work.sum
 
 # Build artifacts
 /dist
+
+.gocache/*
+.cache/*
+/.task/
+/.tool/
+/local/
