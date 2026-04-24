@@ -93,6 +93,19 @@ type Descriptor struct {
 	// Determines where the provider can be used (from, transform, validation, etc.).
 	Capabilities []Capability `json:"capabilities" yaml:"capabilities" doc:"Supported execution contexts" minItems:"1" maxItems:"10" required:"true"`
 
+	// WriteOperations lists operation names that mutate external state.
+	// When set, the executor rejects these operations in resolver (CapabilityFrom)
+	// context to prevent unsafe side effects during DAG resolution, where retries
+	// and parallelism can cause duplicate writes.
+	//
+	// Semantics:
+	//   - nil: provider cannot classify operations (no enforcement occurs).
+	//     Use this for providers like exec or http where the command/request
+	//     determines read vs write behavior.
+	//   - empty ([]string{}): all operations are reads (everything allowed in resolvers).
+	//   - populated: listed operations are blocked in resolver context.
+	WriteOperations []string `json:"writeOperations" yaml:"writeOperations" doc:"Operation names that mutate state" maxItems:"200"`
+
 	// Category classifies the provider for organization in catalogs and documentation.
 	// Examples: "network", "storage", "security", "utility".
 	Category string `json:"category,omitempty" yaml:"category,omitempty" doc:"Classification category" maxLength:"50" example:"network"`
@@ -157,6 +170,17 @@ func (d *Descriptor) DescribeWhatIf(ctx context.Context, input any) string {
 func (d *Descriptor) IsSensitiveField(name string) bool {
 	for _, f := range d.SensitiveFields {
 		if f == name {
+			return true
+		}
+	}
+	return false
+}
+
+// IsWriteOperation reports whether the named operation is listed in WriteOperations.
+// Returns false when WriteOperations is nil (provider cannot classify operations).
+func (d *Descriptor) IsWriteOperation(name string) bool {
+	for _, op := range d.WriteOperations {
+		if op == name {
 			return true
 		}
 	}
@@ -285,6 +309,18 @@ func ValidateDescriptor(desc *Descriptor) error {
 				errs = append(errs, fmt.Errorf("capability %q field %q must be type %q, got %q", cap, fieldName, expectedType, prop.Type))
 			}
 		}
+	}
+
+	seen := make(map[string]struct{}, len(desc.WriteOperations))
+	for _, op := range desc.WriteOperations {
+		if op == "" {
+			errs = append(errs, errors.New("WriteOperations must not contain empty strings"))
+			break
+		}
+		if _, dup := seen[op]; dup {
+			errs = append(errs, fmt.Errorf("WriteOperations contains duplicate entry %q", op))
+		}
+		seen[op] = struct{}{}
 	}
 
 	if len(errs) > 0 {

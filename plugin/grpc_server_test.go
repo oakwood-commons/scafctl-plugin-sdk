@@ -492,6 +492,7 @@ func TestDescriptorRoundTrip(t *testing.T) {
 		Icon: "https://example.com/icon.png", IsDeprecated: true, Beta: true,
 		Capabilities:    []provider.Capability{provider.CapabilityTransform, provider.CapabilityFrom},
 		SensitiveFields: []string{"secret"},
+		WriteOperations: []string{"create_label", "delete_label"},
 		Links:           []provider.Link{{Name: "docs", URL: "https://example.com"}},
 		Examples:        []provider.Example{{Name: "ex1", Description: "desc", YAML: "yaml: true"}},
 		Maintainers:     []provider.Contact{{Name: "Jane", Email: "jane@ex.com"}},
@@ -536,6 +537,7 @@ func TestDescriptorRoundTrip(t *testing.T) {
 	assert.True(t, pd.HasExtractDependencies)
 	assert.NotNil(t, pd.Schema)
 	assert.NotNil(t, pd.RawSchema)
+	assert.Equal(t, []string{"create_label", "delete_label"}, pd.WriteOperations)
 
 	roundTripped, err := ProtoToDescriptor(pd)
 	require.NoError(t, err)
@@ -551,6 +553,7 @@ func TestDescriptorRoundTrip(t *testing.T) {
 	assert.Equal(t, len(desc.Maintainers), len(roundTripped.Maintainers))
 	assert.NotNil(t, roundTripped.Schema)
 	assert.NotNil(t, roundTripped.ExtractDependencies)
+	assert.Equal(t, desc.WriteOperations, roundTripped.WriteOperations)
 }
 
 func TestProtoToDescriptor_InvalidVersion(t *testing.T) {

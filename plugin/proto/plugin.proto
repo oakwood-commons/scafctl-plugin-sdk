@@ -129,6 +129,7 @@ message ProviderDescriptor {
   bytes raw_schema = 19;
   map<string, bytes> raw_output_schemas = 20;
   bool has_extract_dependencies = 21;
+  repeated string write_operations = 22;
 }
 
 message Link {
