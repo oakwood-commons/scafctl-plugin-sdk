@@ -357,6 +357,7 @@ func descriptorToProto(desc *provider.Descriptor) *proto.ProviderDescriptor {
 		SensitiveFields: desc.SensitiveFields, Tags: desc.Tags, Icon: desc.Icon,
 		Deprecated: desc.IsDeprecated, Beta: desc.Beta,
 		HasExtractDependencies: desc.ExtractDependencies != nil,
+		WriteOperations:        desc.WriteOperations,
 	}
 	for i, cap := range desc.Capabilities {
 		pd.Capabilities[i] = string(cap)
@@ -410,6 +411,7 @@ func ProtoToDescriptor(pd *proto.ProviderDescriptor) (*provider.Descriptor, erro
 		Capabilities:    make([]provider.Capability, len(pd.Capabilities)),
 		SensitiveFields: pd.SensitiveFields, Tags: pd.Tags, Icon: pd.Icon,
 		IsDeprecated: pd.Deprecated, Beta: pd.Beta,
+		WriteOperations: pd.WriteOperations,
 	}
 	for i, cap := range pd.Capabilities {
 		desc.Capabilities[i] = provider.Capability(cap)

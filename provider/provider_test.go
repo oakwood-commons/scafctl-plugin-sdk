@@ -253,4 +253,78 @@ func TestValidateDescriptor(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `unknown capability "unknown-cap"`)
 	})
+
+	t.Run("write operations nil is valid", func(t *testing.T) {
+		d := validDescriptor()
+		d.WriteOperations = nil
+		require.NoError(t, ValidateDescriptor(d))
+	})
+
+	t.Run("write operations empty is valid", func(t *testing.T) {
+		d := validDescriptor()
+		d.WriteOperations = []string{}
+		require.NoError(t, ValidateDescriptor(d))
+	})
+
+	t.Run("write operations populated is valid", func(t *testing.T) {
+		d := validDescriptor()
+		d.WriteOperations = []string{"create_label", "delete_label"}
+		require.NoError(t, ValidateDescriptor(d))
+	})
+
+	t.Run("write operations empty string rejected", func(t *testing.T) {
+		d := validDescriptor()
+		d.WriteOperations = []string{"create_label", ""}
+		err := ValidateDescriptor(d)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must not contain empty strings")
+	})
+
+	t.Run("write operations duplicate rejected", func(t *testing.T) {
+		d := validDescriptor()
+		d.WriteOperations = []string{"create_label", "delete_label", "create_label"}
+		err := ValidateDescriptor(d)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `duplicate entry "create_label"`)
+	})
+}
+
+func TestDescriptor_IsWriteOperation(t *testing.T) {
+	tests := []struct {
+		name            string
+		writeOperations []string
+		operation       string
+		expected        bool
+	}{
+		{
+			name:            "nil write operations returns false",
+			writeOperations: nil,
+			operation:       "create_label",
+			expected:        false,
+		},
+		{
+			name:            "empty write operations returns false",
+			writeOperations: []string{},
+			operation:       "create_label",
+			expected:        false,
+		},
+		{
+			name:            "matching operation returns true",
+			writeOperations: []string{"create_label", "delete_label"},
+			operation:       "create_label",
+			expected:        true,
+		},
+		{
+			name:            "non-matching operation returns false",
+			writeOperations: []string{"create_label", "delete_label"},
+			operation:       "list_labels",
+			expected:        false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &Descriptor{WriteOperations: tt.writeOperations}
+			assert.Equal(t, tt.expected, d.IsWriteOperation(tt.operation))
+		})
+	}
 }
