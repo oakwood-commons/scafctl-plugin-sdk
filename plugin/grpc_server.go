@@ -16,6 +16,7 @@ import (
 	goplugin "github.com/hashicorp/go-plugin"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/plugin/proto"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/provider"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -23,8 +24,13 @@ import (
 // GRPCServer implements the gRPC server for the plugin.
 type GRPCServer struct {
 	proto.UnimplementedPluginServiceServer
-	Impl   ProviderPlugin
-	broker *goplugin.GRPCBroker
+	Impl       ProviderPlugin
+	broker     *goplugin.GRPCBroker
+	mu         sync.RWMutex
+	conn       *grpc.ClientConn
+	hostClient *HostServiceClient
+	// dialFunc overrides broker.Dial; set in tests to avoid a real GRPCBroker.
+	dialFunc func(id uint32) (*grpc.ClientConn, error)
 }
 
 //nolint:revive // req is required by gRPC interface
@@ -55,6 +61,7 @@ func (s *GRPCServer) ExecuteProvider(ctx context.Context, req *proto.ExecuteProv
 	if ctxErr != nil {
 		return &proto.ExecuteProviderResponse{Error: ctxErr.Error()}, nil //nolint:nilerr
 	}
+	ctx = s.injectHostClient(ctx)
 	output, err := s.Impl.ExecuteProvider(ctx, req.ProviderName, input)
 	if err != nil {
 		return &proto.ExecuteProviderResponse{Error: err.Error()}, nil //nolint:nilerr
@@ -78,6 +85,23 @@ func (s *GRPCServer) ConfigureProvider(ctx context.Context, req *proto.Configure
 		HostServiceID: req.HostServiceId,
 		Settings:      settings,
 	}
+	// Dial the host's HostService broker if an ID was provided.
+	if req.HostServiceId != 0 {
+		if dialFn := s.pickDialFunc(); dialFn != nil {
+			s.mu.Lock()
+			if s.hostClient == nil {
+				conn, err := dialFn(req.HostServiceId)
+				if err != nil {
+					s.mu.Unlock()
+					return &proto.ConfigureProviderResponse{Error: fmt.Sprintf("failed to dial host service: %v", err)}, nil //nolint:nilerr
+				}
+				s.conn = conn
+				s.hostClient = NewHostServiceClient(conn)
+			}
+			s.mu.Unlock()
+		}
+	}
+	ctx = s.injectHostClient(ctx)
 	if err := s.Impl.ConfigureProvider(ctx, req.ProviderName, cfg); err != nil {
 		return &proto.ConfigureProviderResponse{Error: err.Error()}, nil //nolint:nilerr
 	}
@@ -104,6 +128,7 @@ func (s *GRPCServer) ExecuteProviderStream(req *proto.ExecuteProviderRequest, st
 			},
 		})
 	}
+	ctx = s.injectHostClient(ctx)
 	forwarder := newStreamForwarder(stream)
 	err := s.Impl.ExecuteProviderStream(ctx, req.ProviderName, input, forwarder.forward)
 	if err != nil {
@@ -126,6 +151,7 @@ func (s *GRPCServer) DescribeWhatIf(ctx context.Context, req *proto.DescribeWhat
 			return &proto.DescribeWhatIfResponse{Error: fmt.Sprintf("failed to decode input: %v", err)}, nil //nolint:nilerr
 		}
 	}
+	ctx = s.injectHostClient(ctx)
 	description, err := s.Impl.DescribeWhatIf(ctx, req.ProviderName, input)
 	if err != nil {
 		return &proto.DescribeWhatIfResponse{Error: err.Error()}, nil //nolint:nilerr
@@ -140,6 +166,7 @@ func (s *GRPCServer) ExtractDependencies(ctx context.Context, req *proto.Extract
 			return &proto.ExtractDependenciesResponse{Error: fmt.Sprintf("failed to decode inputs: %v", err)}, nil //nolint:nilerr
 		}
 	}
+	ctx = s.injectHostClient(ctx)
 	deps, err := s.Impl.ExtractDependencies(ctx, req.ProviderName, inputs)
 	if err != nil {
 		return &proto.ExtractDependenciesResponse{Error: err.Error()}, nil //nolint:nilerr
@@ -151,10 +178,41 @@ func (s *GRPCServer) StopProvider(ctx context.Context, req *proto.StopProviderRe
 	if err := s.Impl.StopProvider(ctx, req.ProviderName); err != nil {
 		return &proto.StopProviderResponse{Error: err.Error()}, nil //nolint:nilerr
 	}
+	s.mu.Lock()
+	if s.conn != nil {
+		_ = s.conn.Close()
+		s.conn = nil
+	}
+	s.hostClient = nil
+	s.mu.Unlock()
 	return &proto.StopProviderResponse{}, nil
 }
 
 // ---- Context helpers ----
+
+// injectHostClient adds the HostServiceClient to the context if one was
+// established during ConfigureProvider.
+func (s *GRPCServer) injectHostClient(ctx context.Context) context.Context {
+	s.mu.RLock()
+	hc := s.hostClient
+	s.mu.RUnlock()
+	if hc != nil {
+		return WithHostClient(ctx, hc)
+	}
+	return ctx
+}
+
+// pickDialFunc returns the effective dial function: the test override if set,
+// otherwise broker.Dial, or nil if neither is available.
+func (s *GRPCServer) pickDialFunc() func(id uint32) (*grpc.ClientConn, error) {
+	if s.dialFunc != nil {
+		return s.dialFunc
+	}
+	if s.broker != nil {
+		return s.broker.Dial
+	}
+	return nil
+}
 
 func unmarshalIterationContext(ctx context.Context, iter *proto.IterationContext) (context.Context, error) {
 	if iter == nil {

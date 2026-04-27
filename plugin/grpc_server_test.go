@@ -15,6 +15,7 @@ import (
 	"github.com/oakwood-commons/scafctl-plugin-sdk/provider"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -698,4 +699,173 @@ func TestProtoParamToJSON_AllFields(t *testing.T) {
 	assert.Len(t, schema.Enum, 2)
 	assert.NotNil(t, schema.Default)
 	assert.Len(t, schema.Examples, 1)
+}
+
+// --- Host client injection tests ---
+
+func TestGRPCServer_InjectHostClient_NilWhenNotConfigured(t *testing.T) {
+	var capturedCtx context.Context
+	srv := &GRPCServer{Impl: &mockProvider{
+		executeProvider: func(ctx context.Context, _ string, _ map[string]any) (*provider.Output, error) {
+			capturedCtx = ctx
+			return &provider.Output{}, nil
+		},
+	}}
+	_, err := srv.ExecuteProvider(context.Background(), &proto.ExecuteProviderRequest{
+		ProviderName: "test",
+	})
+	require.NoError(t, err)
+	assert.Nil(t, HostClientFromContext(capturedCtx))
+}
+
+func TestGRPCServer_InjectHostClient_PresentWhenConfigured(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
+	var capturedCtx context.Context
+	srv := &GRPCServer{
+		Impl: &mockProvider{
+			executeProvider: func(ctx context.Context, _ string, _ map[string]any) (*provider.Output, error) {
+				capturedCtx = ctx
+				return &provider.Output{}, nil
+			},
+		},
+		hostClient: NewHostServiceClient(conn),
+	}
+	_, err := srv.ExecuteProvider(context.Background(), &proto.ExecuteProviderRequest{
+		ProviderName: "test",
+	})
+	require.NoError(t, err)
+
+	hc := HostClientFromContext(capturedCtx)
+	require.NotNil(t, hc)
+
+	// Verify functional: call through to fake host service.
+	handlers, defaultH, hErr := hc.ListAuthHandlers(context.Background())
+	require.NoError(t, hErr)
+	assert.Equal(t, []string{"gh", "entra"}, handlers)
+	assert.Equal(t, "gh", defaultH)
+}
+
+func TestGRPCServer_InjectHostClient_Stream(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
+	var capturedCtx context.Context
+	srv := &GRPCServer{
+		Impl: &mockProvider{
+			executeProviderStream: func(ctx context.Context, _ string, _ map[string]any, cb func(StreamChunk)) error {
+				capturedCtx = ctx
+				cb(StreamChunk{Result: &provider.Output{}})
+				return nil
+			},
+		},
+		hostClient: NewHostServiceClient(conn),
+	}
+	stream := &mockStream{ctx: context.Background()}
+	err := srv.ExecuteProviderStream(&proto.ExecuteProviderRequest{ProviderName: "test"}, stream)
+	require.NoError(t, err)
+	require.NotNil(t, HostClientFromContext(capturedCtx))
+}
+
+func TestGRPCServer_InjectHostClient_DescribeWhatIf(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
+	var capturedCtx context.Context
+	srv := &GRPCServer{
+		Impl: &mockProvider{
+			describeWhatIf: func(ctx context.Context, _ string, _ map[string]any) (string, error) {
+				capturedCtx = ctx
+				return "desc", nil
+			},
+		},
+		hostClient: NewHostServiceClient(conn),
+	}
+	_, err := srv.DescribeWhatIf(context.Background(), &proto.DescribeWhatIfRequest{ProviderName: "test"})
+	require.NoError(t, err)
+	require.NotNil(t, HostClientFromContext(capturedCtx))
+}
+
+func TestGRPCServer_InjectHostClient_ExtractDependencies(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
+	var capturedCtx context.Context
+	srv := &GRPCServer{
+		Impl: &mockProvider{
+			extractDependencies: func(ctx context.Context, _ string, _ map[string]any) ([]string, error) {
+				capturedCtx = ctx
+				return nil, nil
+			},
+		},
+		hostClient: NewHostServiceClient(conn),
+	}
+	_, err := srv.ExtractDependencies(context.Background(), &proto.ExtractDependenciesRequest{ProviderName: "test"})
+	require.NoError(t, err)
+	require.NotNil(t, HostClientFromContext(capturedCtx))
+}
+
+func TestGRPCServer_ConfigureProvider_DialsViaDialFunc(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
+	var capturedCtx context.Context
+	srv := &GRPCServer{
+		Impl: &mockProvider{
+			configureProvider: func(ctx context.Context, _ string, _ ProviderConfig) error {
+				capturedCtx = ctx
+				return nil
+			},
+		},
+		dialFunc: func(_ uint32) (*grpc.ClientConn, error) { return conn, nil },
+	}
+
+	_, err := srv.ConfigureProvider(context.Background(), &proto.ConfigureProviderRequest{
+		ProviderName:  "test",
+		HostServiceId: 1,
+	})
+	require.NoError(t, err)
+	assert.NotNil(t, srv.hostClient, "hostClient should be set after dial")
+	assert.NotNil(t, srv.conn, "conn should be stored for cleanup")
+
+	// Host client must be injected into the ctx received by ConfigureProvider.
+	require.NotNil(t, capturedCtx)
+	assert.NotNil(t, HostClientFromContext(capturedCtx))
+}
+
+func TestGRPCServer_ConfigureProvider_DialError(t *testing.T) {
+	srv := &GRPCServer{
+		Impl: &mockProvider{
+			configureProvider: func(_ context.Context, _ string, _ ProviderConfig) error {
+				return nil
+			},
+		},
+		dialFunc: func(_ uint32) (*grpc.ClientConn, error) {
+			return nil, errors.New("dial failed")
+		},
+	}
+
+	resp, err := srv.ConfigureProvider(context.Background(), &proto.ConfigureProviderRequest{
+		ProviderName:  "test",
+		HostServiceId: 1,
+	})
+	require.NoError(t, err)
+	assert.Contains(t, resp.Error, "failed to dial host service")
+}
+
+func TestGRPCServer_StopProvider_ClosesConn(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
+	srv := &GRPCServer{
+		Impl:       &mockProvider{},
+		conn:       conn,
+		hostClient: NewHostServiceClient(conn),
+	}
+
+	_, err := srv.StopProvider(context.Background(), &proto.StopProviderRequest{ProviderName: "test"})
+	require.NoError(t, err)
+	assert.Nil(t, srv.conn, "conn should be nil after StopProvider")
+	assert.Nil(t, srv.hostClient, "hostClient should be nil after StopProvider")
 }
