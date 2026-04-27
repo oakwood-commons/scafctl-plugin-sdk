@@ -9,6 +9,8 @@ import (
 
 	"github.com/oakwood-commons/scafctl-plugin-sdk/plugin/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // HostServiceClient wraps the HostService gRPC client (used by plugins).
@@ -108,4 +110,27 @@ func (c *HostServiceClient) GetAuthToken(ctx context.Context, handler, scope str
 		return nil, fmt.Errorf("host GetAuthToken: %s", resp.Error)
 	}
 	return resp, nil
+}
+
+// GetAuthGroups retrieves group memberships for the authenticated user from
+// the host's auth registry. Handlers that implement group queries (e.g.
+// Entra) may return memberships. If the selected handler does not support
+// group queries, this method returns an empty slice and a nil error.
+func (c *HostServiceClient) GetAuthGroups(ctx context.Context, handler string) ([]string, error) {
+	resp, err := c.client.GetAuthGroups(ctx, &proto.GetAuthGroupsRequest{
+		HandlerName: handler,
+	})
+	if err != nil {
+		if status.Code(err) == codes.Unimplemented {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("host GetAuthGroups: %w", err)
+	}
+	if resp.Error != "" {
+		return nil, fmt.Errorf("host GetAuthGroups: %s", resp.Error)
+	}
+	if resp.Groups == nil {
+		return []string{}, nil
+	}
+	return resp.Groups, nil
 }

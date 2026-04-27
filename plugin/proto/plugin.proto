@@ -58,6 +58,13 @@ service HostService {
   // GetAuthToken retrieves a valid access token from the host's auth registry.
   // Plugins use this for authenticated HTTP requests and token refresh on 401.
   rpc GetAuthToken(GetAuthTokenRequest) returns (GetAuthTokenResponse);
+  // GetAuthGroups retrieves group memberships for the authenticated user.
+  // Only handlers that implement group queries (e.g. Entra) will return
+  // groups. If the selected handler does not support group queries, the host
+  // must return a successful GetAuthGroupsResponse with an empty groups list
+  // and no application error, rather than surfacing a gRPC Unimplemented
+  // error.
+  rpc GetAuthGroups(GetAuthGroupsRequest) returns (GetAuthGroupsResponse);
 }
 
 // AuthHandlerService is the auth handler plugin service.
@@ -496,4 +503,16 @@ message GetAuthTokenResponse {
   int64 expires_at_unix = 3;
   string scope = 4;
   string error = 5;
+}
+
+message GetAuthGroupsRequest {
+  string handler_name = 1;
+}
+
+message GetAuthGroupsResponse {
+  // groups contains the group names for the authenticated identity. Entries
+  // are names (not IDs or email addresses), ordering is not guaranteed, and
+  // duplicates should not be returned.
+  repeated string groups = 1;
+  string error = 2;
 }
