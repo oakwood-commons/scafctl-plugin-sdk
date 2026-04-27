@@ -69,6 +69,13 @@ func (f *fakeHostService) GetAuthToken(_ context.Context, req *proto.GetAuthToke
 	return &proto.GetAuthTokenResponse{AccessToken: "tok123", TokenType: "Bearer"}, nil
 }
 
+func (f *fakeHostService) GetAuthGroups(_ context.Context, req *proto.GetAuthGroupsRequest) (*proto.GetAuthGroupsResponse, error) {
+	if req.HandlerName == "error" {
+		return &proto.GetAuthGroupsResponse{Error: "groups error"}, nil
+	}
+	return &proto.GetAuthGroupsResponse{Groups: []string{"group-a", "group-b"}}, nil
+}
+
 func startFakeHostService(t *testing.T) (*grpc.ClientConn, func()) {
 	t.Helper()
 	lis, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
@@ -223,4 +230,44 @@ func TestHostServiceClient_GetAuthToken_Error(t *testing.T) {
 	_, err := c.GetAuthToken(context.Background(), "error", "", 0, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "token error")
+}
+
+func TestHostServiceClient_GetAuthGroups(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+	c := NewHostServiceClient(conn)
+
+	groups, err := c.GetAuthGroups(context.Background(), "entra")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"group-a", "group-b"}, groups)
+}
+
+func TestHostServiceClient_GetAuthGroups_Error(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+	c := NewHostServiceClient(conn)
+
+	_, err := c.GetAuthGroups(context.Background(), "error")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "groups error")
+}
+
+func TestHostServiceClient_GetAuthGroups_Unimplemented(t *testing.T) {
+	// Start a server that returns gRPC Unimplemented for GetAuthGroups
+	// (simulates an older host that hasn't implemented the RPC yet).
+	lis, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	s := grpc.NewServer()
+	proto.RegisterHostServiceServer(s, &proto.UnimplementedHostServiceServer{})
+	go func() { _ = s.Serve(lis) }()
+	defer s.Stop()
+
+	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	defer conn.Close()
+
+	c := NewHostServiceClient(conn)
+	groups, err := c.GetAuthGroups(context.Background(), "gh")
+	require.NoError(t, err)
+	assert.Empty(t, groups)
 }
