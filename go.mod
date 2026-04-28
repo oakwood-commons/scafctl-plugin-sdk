@@ -5,7 +5,7 @@ go 1.26.2
 require (
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/go-logr/logr v1.4.3
-	github.com/google/jsonschema-go v0.4.2
+	github.com/google/jsonschema-go v0.4.3
 	github.com/hashicorp/go-plugin v1.7.0
 	github.com/stretchr/testify v1.11.1
 	google.golang.org/grpc v1.80.0
