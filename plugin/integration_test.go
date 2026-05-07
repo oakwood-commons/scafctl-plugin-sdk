@@ -364,6 +364,7 @@ type mockAuthPlugin struct {
 	tokenResult      *plugin.TokenResponse
 	cachedTokens     []*auth.CachedTokenInfo
 	purgedCount      int
+	availableFlows   []plugin.FlowAvailability
 	stoppedHandlers  []string
 	loggedOutHandler string
 }
@@ -408,6 +409,10 @@ func (m *mockAuthPlugin) ListCachedTokens(_ context.Context, _ string) ([]*auth.
 
 func (m *mockAuthPlugin) PurgeExpiredTokens(_ context.Context, _ string) (int, error) {
 	return m.purgedCount, nil
+}
+
+func (m *mockAuthPlugin) DetectAvailableFlows(_ context.Context, _ string) ([]plugin.FlowAvailability, error) {
+	return m.availableFlows, nil
 }
 
 func (m *mockAuthPlugin) StopAuthHandler(_ context.Context, name string) error {
@@ -486,6 +491,10 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 			},
 		},
 		purgedCount: 3,
+		availableFlows: []plugin.FlowAvailability{
+			{Flow: auth.FlowDeviceCode, Available: true, Reason: "always available"},
+			{Flow: auth.FlowPAT, Available: false, Reason: "GITHUB_TOKEN not set"},
+		},
 	}
 
 	client, cleanup := startAuthServer(t, mock)
@@ -628,6 +637,17 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 		resp, err := client.StopAuthHandler(ctx, &proto.StopAuthHandlerRequest{HandlerName: "github"})
 		require.NoError(t, err)
 		assert.Empty(t, resp.Error)
+	})
+
+	t.Run("DetectAvailableFlows", func(t *testing.T) {
+		resp, err := client.DetectAvailableFlows(ctx, &proto.DetectAvailableFlowsRequest{HandlerName: "github"})
+		require.NoError(t, err)
+		assert.Empty(t, resp.Error)
+		require.Len(t, resp.Flows, 2)
+		assert.Equal(t, "device_code", resp.Flows[0].Flow)
+		assert.True(t, resp.Flows[0].Available)
+		assert.Equal(t, "pat", resp.Flows[1].Flow)
+		assert.False(t, resp.Flows[1].Available)
 	})
 }
 

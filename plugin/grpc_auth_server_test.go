@@ -30,6 +30,7 @@ type mockAuthHandler struct {
 	getToken             func(ctx context.Context, name string, req TokenRequest) (*TokenResponse, error)
 	listCachedTokens     func(ctx context.Context, name string) ([]*auth.CachedTokenInfo, error)
 	purgeExpiredTokens   func(ctx context.Context, name string) (int, error)
+	detectAvailableFlows func(ctx context.Context, name string) ([]FlowAvailability, error)
 	stopAuthHandler      func(ctx context.Context, name string) error
 }
 
@@ -88,6 +89,13 @@ func (m *mockAuthHandler) PurgeExpiredTokens(ctx context.Context, name string) (
 		return m.purgeExpiredTokens(ctx, name)
 	}
 	return 0, nil
+}
+
+func (m *mockAuthHandler) DetectAvailableFlows(ctx context.Context, name string) ([]FlowAvailability, error) {
+	if m.detectAvailableFlows != nil {
+		return m.detectAvailableFlows(ctx, name)
+	}
+	return nil, nil
 }
 
 func (m *mockAuthHandler) StopAuthHandler(ctx context.Context, name string) error {
@@ -331,6 +339,49 @@ func TestAuthGRPCServer_StopAuthHandler_Error(t *testing.T) {
 	assert.Equal(t, "stop fail", resp.Error)
 }
 
+func TestAuthGRPCServer_DetectAvailableFlows(t *testing.T) {
+	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
+		detectAvailableFlows: func(_ context.Context, _ string) ([]FlowAvailability, error) {
+			return []FlowAvailability{
+				{Flow: auth.FlowDeviceCode, Available: true, Reason: "always available"},
+				{Flow: auth.FlowPAT, Available: true, Reason: "GITHUB_TOKEN is set"},
+				{Flow: auth.FlowServicePrincipal, Available: false, Reason: "no credentials found"},
+			}, nil
+		},
+	}}
+	resp, err := srv.DetectAvailableFlows(context.Background(), &proto.DetectAvailableFlowsRequest{HandlerName: "gh"})
+	require.NoError(t, err)
+	assert.Empty(t, resp.Error)
+	require.Len(t, resp.Flows, 3)
+	assert.Equal(t, "device_code", resp.Flows[0].Flow)
+	assert.True(t, resp.Flows[0].Available)
+	assert.Equal(t, "always available", resp.Flows[0].Reason)
+	assert.Equal(t, "pat", resp.Flows[1].Flow)
+	assert.True(t, resp.Flows[1].Available)
+	assert.Equal(t, "service_principal", resp.Flows[2].Flow)
+	assert.False(t, resp.Flows[2].Available)
+}
+
+func TestAuthGRPCServer_DetectAvailableFlows_Error(t *testing.T) {
+	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
+		detectAvailableFlows: func(_ context.Context, _ string) ([]FlowAvailability, error) {
+			return nil, errors.New("detection failed")
+		},
+	}}
+	resp, err := srv.DetectAvailableFlows(context.Background(), &proto.DetectAvailableFlowsRequest{HandlerName: "gh"})
+	require.NoError(t, err)
+	assert.Equal(t, "detection failed", resp.Error)
+	assert.Nil(t, resp.Flows)
+}
+
+func TestAuthGRPCServer_DetectAvailableFlows_Empty(t *testing.T) {
+	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{}}
+	resp, err := srv.DetectAvailableFlows(context.Background(), &proto.DetectAvailableFlowsRequest{HandlerName: "gh"})
+	require.NoError(t, err)
+	assert.Empty(t, resp.Error)
+	assert.Empty(t, resp.Flows)
+}
+
 // --- Conversion helper tests ---
 
 func TestClaimsToProto_Nil(t *testing.T) {
@@ -422,12 +473,16 @@ func TestHandshakeConfig(t *testing.T) {
 
 func TestAuthHandlerHandshakeConfig(t *testing.T) {
 	hc := AuthHandlerHandshakeConfig()
-	assert.Equal(t, uint(1), hc.ProtocolVersion)
+	assert.Equal(t, uint(2), hc.ProtocolVersion)
 	assert.Equal(t, "SCAFCTL_AUTH_PLUGIN", hc.MagicCookieKey)
 }
 
 func TestPluginProtocolVersion(t *testing.T) {
 	assert.Equal(t, int32(2), PluginProtocolVersion)
+}
+
+func TestAuthHandlerPluginProtocolVersion(t *testing.T) {
+	assert.Equal(t, int32(2), AuthHandlerPluginProtocolVersion)
 }
 
 func TestPluginNames(t *testing.T) {

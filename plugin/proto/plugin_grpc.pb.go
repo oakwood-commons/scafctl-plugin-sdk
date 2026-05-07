@@ -463,7 +463,11 @@ type HostServiceClient interface {
 	// Plugins use this for authenticated HTTP requests and token refresh on 401.
 	GetAuthToken(ctx context.Context, in *GetAuthTokenRequest, opts ...grpc.CallOption) (*GetAuthTokenResponse, error)
 	// GetAuthGroups retrieves group memberships for the authenticated user.
-	// Only handlers that implement group queries (e.g. Entra) will return results.
+	// Only handlers that implement group queries (e.g. Entra) will return
+	// groups. If the selected handler does not support group queries, the host
+	// must return a successful GetAuthGroupsResponse with an empty groups list
+	// and no application error, rather than surfacing a gRPC Unimplemented
+	// error.
 	GetAuthGroups(ctx context.Context, in *GetAuthGroupsRequest, opts ...grpc.CallOption) (*GetAuthGroupsResponse, error)
 }
 
@@ -579,7 +583,11 @@ type HostServiceServer interface {
 	// Plugins use this for authenticated HTTP requests and token refresh on 401.
 	GetAuthToken(context.Context, *GetAuthTokenRequest) (*GetAuthTokenResponse, error)
 	// GetAuthGroups retrieves group memberships for the authenticated user.
-	// Only handlers that implement group queries (e.g. Entra) will return results.
+	// Only handlers that implement group queries (e.g. Entra) will return
+	// groups. If the selected handler does not support group queries, the host
+	// must return a successful GetAuthGroupsResponse with an empty groups list
+	// and no application error, rather than surfacing a gRPC Unimplemented
+	// error.
 	GetAuthGroups(context.Context, *GetAuthGroupsRequest) (*GetAuthGroupsResponse, error)
 	mustEmbedUnimplementedHostServiceServer()
 }
@@ -834,6 +842,7 @@ const (
 	AuthHandlerService_ListCachedTokens_FullMethodName     = "/plugin.AuthHandlerService/ListCachedTokens"
 	AuthHandlerService_PurgeExpiredTokens_FullMethodName   = "/plugin.AuthHandlerService/PurgeExpiredTokens"
 	AuthHandlerService_StopAuthHandler_FullMethodName      = "/plugin.AuthHandlerService/StopAuthHandler"
+	AuthHandlerService_DetectAvailableFlows_FullMethodName = "/plugin.AuthHandlerService/DetectAvailableFlows"
 )
 
 // AuthHandlerServiceClient is the client API for AuthHandlerService service.
@@ -862,6 +871,9 @@ type AuthHandlerServiceClient interface {
 	// StopAuthHandler requests graceful shutdown of a running auth handler operation.
 	// handler_name may be empty to stop all handlers.
 	StopAuthHandler(ctx context.Context, in *StopAuthHandlerRequest, opts ...grpc.CallOption) (*StopAuthHandlerResponse, error)
+	// DetectAvailableFlows reports which auth flows have pre-existing environment
+	// credentials for the named handler. The host uses this for flow auto-selection.
+	DetectAvailableFlows(ctx context.Context, in *DetectAvailableFlowsRequest, opts ...grpc.CallOption) (*DetectAvailableFlowsResponse, error)
 }
 
 type authHandlerServiceClient struct {
@@ -971,6 +983,16 @@ func (c *authHandlerServiceClient) StopAuthHandler(ctx context.Context, in *Stop
 	return out, nil
 }
 
+func (c *authHandlerServiceClient) DetectAvailableFlows(ctx context.Context, in *DetectAvailableFlowsRequest, opts ...grpc.CallOption) (*DetectAvailableFlowsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DetectAvailableFlowsResponse)
+	err := c.cc.Invoke(ctx, AuthHandlerService_DetectAvailableFlows_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AuthHandlerServiceServer is the server API for AuthHandlerService service.
 // All implementations must embed UnimplementedAuthHandlerServiceServer
 // for forward compatibility.
@@ -997,6 +1019,9 @@ type AuthHandlerServiceServer interface {
 	// StopAuthHandler requests graceful shutdown of a running auth handler operation.
 	// handler_name may be empty to stop all handlers.
 	StopAuthHandler(context.Context, *StopAuthHandlerRequest) (*StopAuthHandlerResponse, error)
+	// DetectAvailableFlows reports which auth flows have pre-existing environment
+	// credentials for the named handler. The host uses this for flow auto-selection.
+	DetectAvailableFlows(context.Context, *DetectAvailableFlowsRequest) (*DetectAvailableFlowsResponse, error)
 	mustEmbedUnimplementedAuthHandlerServiceServer()
 }
 
@@ -1033,6 +1058,9 @@ func (UnimplementedAuthHandlerServiceServer) PurgeExpiredTokens(context.Context,
 }
 func (UnimplementedAuthHandlerServiceServer) StopAuthHandler(context.Context, *StopAuthHandlerRequest) (*StopAuthHandlerResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method StopAuthHandler not implemented")
+}
+func (UnimplementedAuthHandlerServiceServer) DetectAvailableFlows(context.Context, *DetectAvailableFlowsRequest) (*DetectAvailableFlowsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DetectAvailableFlows not implemented")
 }
 func (UnimplementedAuthHandlerServiceServer) mustEmbedUnimplementedAuthHandlerServiceServer() {}
 func (UnimplementedAuthHandlerServiceServer) testEmbeddedByValue()                            {}
@@ -1210,6 +1238,24 @@ func _AuthHandlerService_StopAuthHandler_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthHandlerService_DetectAvailableFlows_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DetectAvailableFlowsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthHandlerServiceServer).DetectAvailableFlows(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthHandlerService_DetectAvailableFlows_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthHandlerServiceServer).DetectAvailableFlows(ctx, req.(*DetectAvailableFlowsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AuthHandlerService_ServiceDesc is the grpc.ServiceDesc for AuthHandlerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1248,6 +1294,10 @@ var AuthHandlerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "StopAuthHandler",
 			Handler:    _AuthHandlerService_StopAuthHandler_Handler,
+		},
+		{
+			MethodName: "DetectAvailableFlows",
+			Handler:    _AuthHandlerService_DetectAvailableFlows_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
