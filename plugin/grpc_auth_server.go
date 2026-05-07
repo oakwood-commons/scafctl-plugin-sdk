@@ -159,6 +159,22 @@ func (s *AuthHandlerGRPCServer) StopAuthHandler(ctx context.Context, req *proto.
 	return &proto.StopAuthHandlerResponse{}, nil
 }
 
+func (s *AuthHandlerGRPCServer) DetectAvailableFlows(ctx context.Context, req *proto.DetectAvailableFlowsRequest) (*proto.DetectAvailableFlowsResponse, error) {
+	flows, err := s.Impl.DetectAvailableFlows(ctx, req.HandlerName)
+	if err != nil {
+		return &proto.DetectAvailableFlowsResponse{Error: err.Error()}, nil //nolint:nilerr
+	}
+	protoFlows := make([]*proto.FlowAvailability, len(flows))
+	for i, f := range flows {
+		protoFlows[i] = &proto.FlowAvailability{
+			Flow:      string(f.Flow),
+			Available: f.Available,
+			Reason:    f.Reason,
+		}
+	}
+	return &proto.DetectAvailableFlowsResponse{Flows: protoFlows}, nil
+}
+
 // ---- Conversion helpers ----
 
 func claimsToProto(c *auth.Claims) *proto.Claims {

@@ -104,6 +104,14 @@ type TokenResponse struct {
 	SessionID   string    `json:"sessionId,omitempty" yaml:"sessionId,omitempty"`
 }
 
+// FlowAvailability reports whether a specific auth flow is available based on
+// environment credentials or configuration.
+type FlowAvailability struct {
+	Flow      auth.Flow `json:"flow" yaml:"flow"`           // flow name (e.g., "device_code", "pat", "service_principal")
+	Available bool      `json:"available" yaml:"available"` // true if environment credentials exist for this flow
+	Reason    string    `json:"reason" yaml:"reason"`       // human-readable explanation (e.g., "GITHUB_TOKEN is set")
+}
+
 // AuthHandlerPlugin is the interface that auth handler plugins must implement.
 type AuthHandlerPlugin interface {
 	GetAuthHandlers(ctx context.Context) ([]AuthHandlerInfo, error)
@@ -114,6 +122,7 @@ type AuthHandlerPlugin interface {
 	GetToken(ctx context.Context, handlerName string, req TokenRequest) (*TokenResponse, error)
 	ListCachedTokens(ctx context.Context, handlerName string) ([]*auth.CachedTokenInfo, error)
 	PurgeExpiredTokens(ctx context.Context, handlerName string) (int, error)
+	DetectAvailableFlows(ctx context.Context, handlerName string) ([]FlowAvailability, error)
 	StopAuthHandler(ctx context.Context, handlerName string) error
 }
 
@@ -140,6 +149,9 @@ var handshakeConfig = HandshakeConfigData{
 // PluginProtocolVersion is the current plugin protocol version.
 const PluginProtocolVersion int32 = 2
 
+// AuthHandlerPluginProtocolVersion is the current auth handler plugin protocol version.
+const AuthHandlerPluginProtocolVersion int32 = 2
+
 // AuthHandlerHandshakeConfig returns the handshake configuration for auth handler plugin compatibility.
 // Returns a copy to prevent mutation of shared state.
 func AuthHandlerHandshakeConfig() HandshakeConfigData {
@@ -148,7 +160,7 @@ func AuthHandlerHandshakeConfig() HandshakeConfigData {
 
 // authHandlerHandshakeConfig is the internal auth handler plugin handshake configuration.
 var authHandlerHandshakeConfig = HandshakeConfigData{
-	ProtocolVersion:  1,
+	ProtocolVersion:  2,
 	MagicCookieKey:   "SCAFCTL_AUTH_PLUGIN",
 	MagicCookieValue: "scafctl_auth_handler_plugin",
 }

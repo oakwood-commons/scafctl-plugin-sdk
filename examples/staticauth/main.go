@@ -105,6 +105,15 @@ func (p *StaticAuthPlugin) PurgeExpiredTokens(_ context.Context, name string) (i
 	return 0, nil
 }
 
+func (p *StaticAuthPlugin) DetectAvailableFlows(_ context.Context, name string) ([]plugin.FlowAvailability, error) {
+	if name != handlerName {
+		return nil, fmt.Errorf("unknown handler: %s", name)
+	}
+	return []plugin.FlowAvailability{
+		{Flow: auth.FlowPAT, Available: true, Reason: "static handler always available"},
+	}, nil
+}
+
 func (p *StaticAuthPlugin) StopAuthHandler(_ context.Context, name string) error {
 	if name != handlerName {
 		return fmt.Errorf("unknown handler: %s", name)

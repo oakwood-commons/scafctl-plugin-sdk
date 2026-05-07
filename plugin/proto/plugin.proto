@@ -97,6 +97,10 @@ service AuthHandlerService {
   // StopAuthHandler requests graceful shutdown of a running auth handler operation.
   // handler_name may be empty to stop all handlers.
   rpc StopAuthHandler(StopAuthHandlerRequest) returns (StopAuthHandlerResponse);
+
+  // DetectAvailableFlows reports which auth flows have pre-existing environment
+  // credentials for the named handler. The host uses this for flow auto-selection.
+  rpc DetectAvailableFlows(DetectAvailableFlowsRequest) returns (DetectAvailableFlowsResponse);
 }
 
 message GetProvidersRequest {}
@@ -433,6 +437,21 @@ message StopAuthHandlerRequest {
 
 message StopAuthHandlerResponse {
   string error = 1;
+}
+
+message DetectAvailableFlowsRequest {
+  string handler_name = 1;
+}
+
+message DetectAvailableFlowsResponse {
+  repeated FlowAvailability flows = 1;
+  string error = 2;
+}
+
+message FlowAvailability {
+  string flow = 1;
+  bool available = 2;
+  string reason = 3;
 }
 
 // ---- Host Service Messages (plugin → host callbacks) ----

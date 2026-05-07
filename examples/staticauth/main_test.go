@@ -217,6 +217,38 @@ func TestPurgeExpiredTokens(t *testing.T) {
 	assert.Equal(t, 0, n)
 }
 
+func TestDetectAvailableFlows(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler string
+		wantErr string
+	}{
+		{
+			name:    "valid handler",
+			handler: "static",
+		},
+		{
+			name:    "unknown handler",
+			handler: "nope",
+			wantErr: "unknown handler: nope",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			flows, err := newStaticAuth().DetectAvailableFlows(context.Background(), tc.handler)
+			if tc.wantErr != "" {
+				require.EqualError(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, flows, 1)
+			assert.Equal(t, auth.FlowPAT, flows[0].Flow)
+			assert.True(t, flows[0].Available)
+			assert.NotEmpty(t, flows[0].Reason)
+		})
+	}
+}
+
 func TestStopAuthHandler(t *testing.T) {
 	err := newStaticAuth().StopAuthHandler(context.Background(), "static")
 	require.NoError(t, err)
