@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"sync"
 	"testing"
 	"time"
 
@@ -272,15 +273,21 @@ func TestAuthGRPCServer_PurgeExpiredTokens(t *testing.T) {
 }
 
 func TestAuthGRPCServer_ConfigureAuthHandler(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
 	var gotCfg ProviderConfig
+	var capturedCtx context.Context
 	srv := &AuthHandlerGRPCServer{
 		Impl: &mockAuthHandler{
-			configureAuthHandler: func(_ context.Context, _ string, cfg ProviderConfig) error {
+			configureAuthHandler: func(ctx context.Context, _ string, cfg ProviderConfig) error {
 				gotCfg = cfg
+				capturedCtx = ctx
 				return nil
 			},
 		},
-		broker: &goplugin.GRPCBroker{},
+		broker:   &goplugin.GRPCBroker{},
+		dialFunc: func(_ uint32) (*grpc.ClientConn, error) { return conn, nil },
 	}
 	resp, err := srv.ConfigureAuthHandler(context.Background(), &proto.ConfigureAuthHandlerRequest{
 		HandlerName: "gh", Quiet: true, NoColor: true, BinaryName: "bin",
@@ -291,6 +298,28 @@ func TestAuthGRPCServer_ConfigureAuthHandler(t *testing.T) {
 	assert.Equal(t, PluginProtocolVersion, resp.ProtocolVersion)
 	assert.True(t, gotCfg.Quiet)
 	assert.Equal(t, uint32(42), gotCfg.HostServiceID)
+	assert.NotNil(t, srv.hostClient, "hostClient should be set after dial")
+	assert.NotNil(t, srv.conn, "conn should be stored for cleanup")
+	require.NotNil(t, capturedCtx)
+	assert.NotNil(t, HostClientFromContext(capturedCtx), "host client should be injected into context")
+}
+
+func TestAuthGRPCServer_ConfigureAuthHandler_DialError(t *testing.T) {
+	srv := &AuthHandlerGRPCServer{
+		Impl: &mockAuthHandler{
+			configureAuthHandler: func(_ context.Context, _ string, _ ProviderConfig) error {
+				return nil
+			},
+		},
+		dialFunc: func(_ uint32) (*grpc.ClientConn, error) {
+			return nil, errors.New("dial failed")
+		},
+	}
+	resp, err := srv.ConfigureAuthHandler(context.Background(), &proto.ConfigureAuthHandlerRequest{
+		HandlerName: "gh", HostServiceId: 1,
+	})
+	require.NoError(t, err)
+	assert.Contains(t, resp.Error, "failed to dial host service")
 }
 
 func TestAuthGRPCServer_ConfigureAuthHandler_NoBroker(t *testing.T) {
@@ -308,8 +337,164 @@ func TestAuthGRPCServer_ConfigureAuthHandler_NoBroker(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Empty(t, resp.Error)
-	// HostServiceID should not be set when broker is nil
-	assert.Equal(t, uint32(0), gotCfg.HostServiceID)
+	// HostServiceID is always passed through to the plugin, regardless of broker
+	assert.Equal(t, uint32(42), gotCfg.HostServiceID)
+}
+
+func TestAuthGRPCServer_StopAuthHandler_ClosesConn(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
+	srv := &AuthHandlerGRPCServer{
+		Impl:       &mockAuthHandler{},
+		conn:       conn,
+		hostClient: NewHostServiceClient(conn),
+	}
+	_, err := srv.StopAuthHandler(context.Background(), &proto.StopAuthHandlerRequest{HandlerName: "gh"})
+	require.NoError(t, err)
+	assert.Nil(t, srv.conn, "conn should be nil after StopAuthHandler")
+	assert.Nil(t, srv.hostClient, "hostClient should be nil after StopAuthHandler")
+}
+
+func TestAuthGRPCServer_InjectHostClient_Login(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
+	var capturedCtx context.Context
+	srv := &AuthHandlerGRPCServer{
+		Impl: &mockAuthHandler{
+			login: func(ctx context.Context, _ string, _ LoginRequest, _ func(DeviceCodePrompt)) (*LoginResponse, error) {
+				capturedCtx = ctx
+				return &LoginResponse{Claims: &auth.Claims{Subject: "test"}, ExpiresAt: time.Now().Add(time.Hour)}, nil
+			},
+		},
+		hostClient: NewHostServiceClient(conn),
+	}
+	stream := &mockLoginStream{ctx: context.Background()}
+	err := srv.Login(&proto.LoginRequest{HandlerName: "gh", Flow: "pat"}, stream)
+	require.NoError(t, err)
+	require.NotNil(t, capturedCtx)
+	assert.NotNil(t, HostClientFromContext(capturedCtx))
+}
+
+func TestAuthGRPCServer_InjectHostClient_Logout(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
+	var capturedCtx context.Context
+	srv := &AuthHandlerGRPCServer{
+		Impl: &mockAuthHandler{
+			logout: func(ctx context.Context, _ string) error {
+				capturedCtx = ctx
+				return nil
+			},
+		},
+		hostClient: NewHostServiceClient(conn),
+	}
+	_, err := srv.Logout(context.Background(), &proto.LogoutRequest{HandlerName: "gh"})
+	require.NoError(t, err)
+	require.NotNil(t, capturedCtx)
+	assert.NotNil(t, HostClientFromContext(capturedCtx))
+}
+
+func TestAuthGRPCServer_InjectHostClient_GetStatus(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
+	var capturedCtx context.Context
+	srv := &AuthHandlerGRPCServer{
+		Impl: &mockAuthHandler{
+			getStatus: func(ctx context.Context, _ string) (*auth.Status, error) {
+				capturedCtx = ctx
+				return &auth.Status{Authenticated: true}, nil
+			},
+		},
+		hostClient: NewHostServiceClient(conn),
+	}
+	_, err := srv.GetStatus(context.Background(), &proto.GetStatusRequest{HandlerName: "gh"})
+	require.NoError(t, err)
+	require.NotNil(t, capturedCtx)
+	assert.NotNil(t, HostClientFromContext(capturedCtx))
+}
+
+func TestAuthGRPCServer_InjectHostClient_GetToken(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
+	var capturedCtx context.Context
+	srv := &AuthHandlerGRPCServer{
+		Impl: &mockAuthHandler{
+			getToken: func(ctx context.Context, _ string, _ TokenRequest) (*TokenResponse, error) {
+				capturedCtx = ctx
+				return &TokenResponse{AccessToken: "tok", TokenType: "Bearer", ExpiresAt: time.Now().Add(time.Hour)}, nil
+			},
+		},
+		hostClient: NewHostServiceClient(conn),
+	}
+	_, err := srv.GetToken(context.Background(), &proto.GetTokenRequest{HandlerName: "gh"})
+	require.NoError(t, err)
+	require.NotNil(t, capturedCtx)
+	assert.NotNil(t, HostClientFromContext(capturedCtx))
+}
+
+func TestAuthGRPCServer_InjectHostClient_ListCachedTokens(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
+	var capturedCtx context.Context
+	srv := &AuthHandlerGRPCServer{
+		Impl: &mockAuthHandler{
+			listCachedTokens: func(ctx context.Context, _ string) ([]*auth.CachedTokenInfo, error) {
+				capturedCtx = ctx
+				return nil, nil
+			},
+		},
+		hostClient: NewHostServiceClient(conn),
+	}
+	_, err := srv.ListCachedTokens(context.Background(), &proto.ListCachedTokensRequest{HandlerName: "gh"})
+	require.NoError(t, err)
+	require.NotNil(t, capturedCtx)
+	assert.NotNil(t, HostClientFromContext(capturedCtx))
+}
+
+func TestAuthGRPCServer_InjectHostClient_PurgeExpiredTokens(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
+	var capturedCtx context.Context
+	srv := &AuthHandlerGRPCServer{
+		Impl: &mockAuthHandler{
+			purgeExpiredTokens: func(ctx context.Context, _ string) (int, error) {
+				capturedCtx = ctx
+				return 0, nil
+			},
+		},
+		hostClient: NewHostServiceClient(conn),
+	}
+	_, err := srv.PurgeExpiredTokens(context.Background(), &proto.PurgeExpiredTokensRequest{HandlerName: "gh"})
+	require.NoError(t, err)
+	require.NotNil(t, capturedCtx)
+	assert.NotNil(t, HostClientFromContext(capturedCtx))
+}
+
+func TestAuthGRPCServer_InjectHostClient_DetectAvailableFlows(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
+	var capturedCtx context.Context
+	srv := &AuthHandlerGRPCServer{
+		Impl: &mockAuthHandler{
+			detectAvailableFlows: func(ctx context.Context, _ string) ([]FlowAvailability, error) {
+				capturedCtx = ctx
+				return nil, nil
+			},
+		},
+		hostClient: NewHostServiceClient(conn),
+	}
+	_, err := srv.DetectAvailableFlows(context.Background(), &proto.DetectAvailableFlowsRequest{HandlerName: "gh"})
+	require.NoError(t, err)
+	require.NotNil(t, capturedCtx)
+	assert.NotNil(t, HostClientFromContext(capturedCtx))
 }
 
 func TestAuthGRPCServer_ConfigureAuthHandler_Error(t *testing.T) {
@@ -321,6 +506,27 @@ func TestAuthGRPCServer_ConfigureAuthHandler_Error(t *testing.T) {
 	resp, err := srv.ConfigureAuthHandler(context.Background(), &proto.ConfigureAuthHandlerRequest{HandlerName: "gh"})
 	require.NoError(t, err)
 	assert.Equal(t, "config fail", resp.Error)
+}
+
+func TestAuthGRPCServer_ConfigureAuthHandler_ErrorCleansUpConn(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
+	srv := &AuthHandlerGRPCServer{
+		Impl: &mockAuthHandler{
+			configureAuthHandler: func(_ context.Context, _ string, _ ProviderConfig) error {
+				return errors.New("config fail")
+			},
+		},
+		dialFunc: func(_ uint32) (*grpc.ClientConn, error) { return conn, nil },
+	}
+	resp, err := srv.ConfigureAuthHandler(context.Background(), &proto.ConfigureAuthHandlerRequest{
+		HandlerName: "gh", HostServiceId: 42,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "config fail", resp.Error)
+	assert.Nil(t, srv.conn, "conn should be cleaned up after config error")
+	assert.Nil(t, srv.hostClient, "hostClient should be cleaned up after config error")
 }
 
 func TestAuthGRPCServer_StopAuthHandler(t *testing.T) {
@@ -618,6 +824,51 @@ type failingSendLoginStream struct {
 func (s *failingSendLoginStream) Context() context.Context { return s.ctx }
 func (s *failingSendLoginStream) Send(_ *proto.LoginStreamMessage) error {
 	return errors.New("send failed")
+}
+
+func TestAuthGRPCServer_pickDialFunc_NoBrokerNoOverride(t *testing.T) {
+	s := &AuthHandlerGRPCServer{}
+	assert.Nil(t, s.pickDialFunc())
+}
+
+func TestAuthGRPCServer_pickDialFunc_BrokerOnly(t *testing.T) {
+	s := &AuthHandlerGRPCServer{broker: &goplugin.GRPCBroker{}}
+	assert.NotNil(t, s.pickDialFunc())
+}
+
+func TestAuthGRPCServer_EnsureHostClient_ClosedPreventsCommit(t *testing.T) {
+	conn, cleanup := startFakeHostService(t)
+	defer cleanup()
+
+	dialStarted := make(chan struct{})
+	dialProceed := make(chan struct{})
+
+	srv := &AuthHandlerGRPCServer{
+		Impl: &mockAuthHandler{},
+		dialFunc: func(_ uint32) (*grpc.ClientConn, error) {
+			close(dialStarted)
+			<-dialProceed
+			return conn, nil
+		},
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_ = srv.ensureHostClient(1)
+	}()
+
+	<-dialStarted
+	srv.closeHostClient(context.Background())
+	close(dialProceed)
+
+	wg.Wait()
+
+	srv.mu.RLock()
+	defer srv.mu.RUnlock()
+	assert.Nil(t, srv.conn, "conn must not be committed after closeHostClient")
+	assert.Nil(t, srv.hostClient, "hostClient must not be committed after closeHostClient")
 }
 
 // --- suppress unused import warnings ---
