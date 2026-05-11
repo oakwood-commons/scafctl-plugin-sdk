@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,6 +24,17 @@ type AuthHandlerGRPCServer struct {
 	proto.UnimplementedAuthHandlerServiceServer
 	Impl   AuthHandlerPlugin
 	broker *goplugin.GRPCBroker
+	mu     sync.RWMutex
+	conn   *grpc.ClientConn
+	// hostClient is the HostServiceClient for secret store operations.
+	// Established during ConfigureAuthHandler when the host provides a
+	// HostServiceId via the gRPC broker.
+	hostClient *HostServiceClient
+	// closed is set by closeHostClient to prevent ensureHostClient from
+	// committing a connection after the handler has been stopped.
+	closed bool
+	// dialFunc overrides broker.Dial; set in tests to avoid a real GRPCBroker.
+	dialFunc func(id uint32) (*grpc.ClientConn, error)
 }
 
 //nolint:revive
@@ -47,7 +59,7 @@ func (s *AuthHandlerGRPCServer) GetAuthHandlers(ctx context.Context, _ *proto.Ge
 }
 
 func (s *AuthHandlerGRPCServer) Login(req *proto.LoginRequest, stream grpc.ServerStreamingServer[proto.LoginStreamMessage]) error {
-	ctx := stream.Context()
+	ctx := s.injectHostClient(stream.Context())
 	lgr := logr.FromContextOrDiscard(ctx)
 	var sendFailed atomic.Bool
 	deviceCodeCb := func(prompt DeviceCodePrompt) {
@@ -91,6 +103,7 @@ func (s *AuthHandlerGRPCServer) Login(req *proto.LoginRequest, stream grpc.Serve
 }
 
 func (s *AuthHandlerGRPCServer) Logout(ctx context.Context, req *proto.LogoutRequest) (*proto.LogoutResponse, error) {
+	ctx = s.injectHostClient(ctx)
 	if err := s.Impl.Logout(ctx, req.HandlerName); err != nil {
 		return nil, fmt.Errorf("Logout %q: %w", req.HandlerName, err)
 	}
@@ -98,6 +111,7 @@ func (s *AuthHandlerGRPCServer) Logout(ctx context.Context, req *proto.LogoutReq
 }
 
 func (s *AuthHandlerGRPCServer) GetStatus(ctx context.Context, req *proto.GetStatusRequest) (*proto.GetStatusResponse, error) {
+	ctx = s.injectHostClient(ctx)
 	st, err := s.Impl.GetStatus(ctx, req.HandlerName)
 	if err != nil {
 		return nil, fmt.Errorf("GetStatus %q: %w", req.HandlerName, err)
@@ -106,6 +120,7 @@ func (s *AuthHandlerGRPCServer) GetStatus(ctx context.Context, req *proto.GetSta
 }
 
 func (s *AuthHandlerGRPCServer) GetToken(ctx context.Context, req *proto.GetTokenRequest) (*proto.GetTokenResponse, error) {
+	ctx = s.injectHostClient(ctx)
 	tokenReq := TokenRequest{Scope: req.Scope, MinValidFor: time.Duration(req.MinValidForSeconds) * time.Second, ForceRefresh: req.ForceRefresh}
 	token, err := s.Impl.GetToken(ctx, req.HandlerName, tokenReq)
 	if err != nil {
@@ -115,6 +130,7 @@ func (s *AuthHandlerGRPCServer) GetToken(ctx context.Context, req *proto.GetToke
 }
 
 func (s *AuthHandlerGRPCServer) ListCachedTokens(ctx context.Context, req *proto.ListCachedTokensRequest) (*proto.ListCachedTokensResponse, error) {
+	ctx = s.injectHostClient(ctx)
 	tokens, err := s.Impl.ListCachedTokens(ctx, req.HandlerName)
 	if err != nil {
 		return nil, fmt.Errorf("ListCachedTokens %q: %w", req.HandlerName, err)
@@ -127,6 +143,7 @@ func (s *AuthHandlerGRPCServer) ListCachedTokens(ctx context.Context, req *proto
 }
 
 func (s *AuthHandlerGRPCServer) PurgeExpiredTokens(ctx context.Context, req *proto.PurgeExpiredTokensRequest) (*proto.PurgeExpiredTokensResponse, error) {
+	ctx = s.injectHostClient(ctx)
 	count, err := s.Impl.PurgeExpiredTokens(ctx, req.HandlerName)
 	if err != nil {
 		return nil, fmt.Errorf("PurgeExpiredTokens %q: %w", req.HandlerName, err)
@@ -142,11 +159,21 @@ func (s *AuthHandlerGRPCServer) ConfigureAuthHandler(ctx context.Context, req *p
 	for k, v := range req.Settings {
 		settings[k] = json.RawMessage(v)
 	}
-	cfg := ProviderConfig{Quiet: req.Quiet, NoColor: req.NoColor, BinaryName: req.BinaryName, Settings: settings}
-	if req.HostServiceId != 0 && s.broker != nil {
-		cfg.HostServiceID = req.HostServiceId
+	cfg := ProviderConfig{Quiet: req.Quiet, NoColor: req.NoColor, BinaryName: req.BinaryName, Settings: settings, HostServiceID: req.HostServiceId}
+	// Dial the host's HostService broker if an ID was provided and a dial
+	// function is available. When no broker or dialFunc is set (e.g. in tests),
+	// this is a no-op.
+	if req.HostServiceId != 0 {
+		s.mu.Lock()
+		s.closed = false
+		s.mu.Unlock()
+		if err := s.ensureHostClient(req.HostServiceId); err != nil {
+			return &proto.ConfigureAuthHandlerResponse{Error: fmt.Sprintf("failed to dial host service: %v", err)}, nil //nolint:nilerr
+		}
 	}
+	ctx = s.injectHostClient(ctx)
 	if err := s.Impl.ConfigureAuthHandler(ctx, req.HandlerName, cfg); err != nil {
+		s.closeHostClient(ctx)
 		return &proto.ConfigureAuthHandlerResponse{Error: err.Error()}, nil //nolint:nilerr
 	}
 	return &proto.ConfigureAuthHandlerResponse{ProtocolVersion: PluginProtocolVersion}, nil
@@ -156,10 +183,81 @@ func (s *AuthHandlerGRPCServer) StopAuthHandler(ctx context.Context, req *proto.
 	if err := s.Impl.StopAuthHandler(ctx, req.HandlerName); err != nil {
 		return &proto.StopAuthHandlerResponse{Error: err.Error()}, nil //nolint:nilerr
 	}
+	s.closeHostClient(ctx)
 	return &proto.StopAuthHandlerResponse{}, nil
 }
 
+// closeHostClient tears down the host service connection and clears the cached
+// client, if any.
+func (s *AuthHandlerGRPCServer) closeHostClient(ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	if s.conn != nil {
+		if err := s.conn.Close(); err != nil {
+			logr.FromContextOrDiscard(ctx).V(1).Info("close host conn", "error", err)
+		}
+		s.conn = nil
+	}
+	s.hostClient = nil
+}
+
+// ensureHostClient dials the host service if not already connected. The dial
+// happens outside the lock so slow connections don't block concurrent readers.
+func (s *AuthHandlerGRPCServer) ensureHostClient(hostServiceID uint32) error {
+	dialFn := s.pickDialFunc()
+	if dialFn == nil {
+		return nil
+	}
+	s.mu.RLock()
+	already := s.hostClient != nil
+	s.mu.RUnlock()
+	if already {
+		return nil
+	}
+	conn, err := dialFn(hostServiceID)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.hostClient != nil || s.closed {
+		// Another goroutine won the race, or the handler was stopped while
+		// we were dialing; close the connection we just opened.
+		_ = conn.Close()
+		return nil
+	}
+	s.conn = conn
+	s.hostClient = NewHostServiceClient(conn)
+	return nil
+}
+
+// injectHostClient adds the HostServiceClient to the context if one was
+// established during ConfigureAuthHandler.
+func (s *AuthHandlerGRPCServer) injectHostClient(ctx context.Context) context.Context {
+	s.mu.RLock()
+	hc := s.hostClient
+	s.mu.RUnlock()
+	if hc != nil {
+		return WithHostClient(ctx, hc)
+	}
+	return ctx
+}
+
+// pickDialFunc returns the effective dial function: the test override if set,
+// otherwise broker.Dial, or nil if neither is available.
+func (s *AuthHandlerGRPCServer) pickDialFunc() func(id uint32) (*grpc.ClientConn, error) {
+	if s.dialFunc != nil {
+		return s.dialFunc
+	}
+	if s.broker != nil {
+		return s.broker.Dial
+	}
+	return nil
+}
+
 func (s *AuthHandlerGRPCServer) DetectAvailableFlows(ctx context.Context, req *proto.DetectAvailableFlowsRequest) (*proto.DetectAvailableFlowsResponse, error) {
+	ctx = s.injectHostClient(ctx)
 	flows, err := s.Impl.DetectAvailableFlows(ctx, req.HandlerName)
 	if err != nil {
 		return &proto.DetectAvailableFlowsResponse{Error: err.Error()}, nil //nolint:nilerr
