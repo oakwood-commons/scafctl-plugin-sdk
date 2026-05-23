@@ -60,6 +60,7 @@ func (s *AuthHandlerGRPCServer) GetAuthHandlers(ctx context.Context, _ *proto.Ge
 
 func (s *AuthHandlerGRPCServer) Login(req *proto.LoginRequest, stream grpc.ServerStreamingServer[proto.LoginStreamMessage]) error {
 	ctx := s.injectHostClient(stream.Context())
+	ctx = auth.WithProfile(ctx, req.Profile)
 	lgr := logr.FromContextOrDiscard(ctx)
 	var sendFailed atomic.Bool
 	deviceCodeCb := func(prompt DeviceCodePrompt) {
@@ -104,6 +105,7 @@ func (s *AuthHandlerGRPCServer) Login(req *proto.LoginRequest, stream grpc.Serve
 
 func (s *AuthHandlerGRPCServer) Logout(ctx context.Context, req *proto.LogoutRequest) (*proto.LogoutResponse, error) {
 	ctx = s.injectHostClient(ctx)
+	ctx = auth.WithProfile(ctx, req.Profile)
 	if err := s.Impl.Logout(ctx, req.HandlerName); err != nil {
 		return nil, fmt.Errorf("Logout %q: %w", req.HandlerName, err)
 	}
@@ -112,6 +114,7 @@ func (s *AuthHandlerGRPCServer) Logout(ctx context.Context, req *proto.LogoutReq
 
 func (s *AuthHandlerGRPCServer) GetStatus(ctx context.Context, req *proto.GetStatusRequest) (*proto.GetStatusResponse, error) {
 	ctx = s.injectHostClient(ctx)
+	ctx = auth.WithProfile(ctx, req.Profile)
 	st, err := s.Impl.GetStatus(ctx, req.HandlerName)
 	if err != nil {
 		return nil, fmt.Errorf("GetStatus %q: %w", req.HandlerName, err)
@@ -121,6 +124,7 @@ func (s *AuthHandlerGRPCServer) GetStatus(ctx context.Context, req *proto.GetSta
 
 func (s *AuthHandlerGRPCServer) GetToken(ctx context.Context, req *proto.GetTokenRequest) (*proto.GetTokenResponse, error) {
 	ctx = s.injectHostClient(ctx)
+	ctx = auth.WithProfile(ctx, req.Profile)
 	tokenReq := TokenRequest{Scope: req.Scope, MinValidFor: time.Duration(req.MinValidForSeconds) * time.Second, ForceRefresh: req.ForceRefresh}
 	token, err := s.Impl.GetToken(ctx, req.HandlerName, tokenReq)
 	if err != nil {
@@ -131,6 +135,7 @@ func (s *AuthHandlerGRPCServer) GetToken(ctx context.Context, req *proto.GetToke
 
 func (s *AuthHandlerGRPCServer) ListCachedTokens(ctx context.Context, req *proto.ListCachedTokensRequest) (*proto.ListCachedTokensResponse, error) {
 	ctx = s.injectHostClient(ctx)
+	ctx = auth.WithProfile(ctx, req.Profile)
 	tokens, err := s.Impl.ListCachedTokens(ctx, req.HandlerName)
 	if err != nil {
 		return nil, fmt.Errorf("ListCachedTokens %q: %w", req.HandlerName, err)
@@ -144,6 +149,7 @@ func (s *AuthHandlerGRPCServer) ListCachedTokens(ctx context.Context, req *proto
 
 func (s *AuthHandlerGRPCServer) PurgeExpiredTokens(ctx context.Context, req *proto.PurgeExpiredTokensRequest) (*proto.PurgeExpiredTokensResponse, error) {
 	ctx = s.injectHostClient(ctx)
+	ctx = auth.WithProfile(ctx, req.Profile)
 	count, err := s.Impl.PurgeExpiredTokens(ctx, req.HandlerName)
 	if err != nil {
 		return nil, fmt.Errorf("PurgeExpiredTokens %q: %w", req.HandlerName, err)

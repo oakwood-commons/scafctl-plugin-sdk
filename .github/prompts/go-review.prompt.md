@@ -6,7 +6,7 @@ Review the current Go code changes thoroughly. You MUST complete ALL phases belo
 
 ## Phase 1: Automated checks
 
-1. Run `go vet ./...`
+1. Run `go vet ./...` and `task lint`
 2. Run `git diff --stat HEAD -- '*.go'` and `git status --short` to identify all changed/new files
 3. Read the full diff for all changed files
 4. Read the full contents of all new (untracked) files
@@ -21,11 +21,14 @@ For each changed/new file, check ALL of these categories. Do not skip any.
 - [ ] Hardcoded secrets, tokens, or credentials
 - [ ] Unsafe deserialization of untrusted input
 - [ ] Race conditions (shared state without synchronization)
+- [ ] Command injection (user input passed to exec without sanitization)
+- [ ] Path traversal (user-controlled paths not validated for containment)
 
 ### Error handling
 - [ ] Ignored errors (unchecked error returns, `_ = someFunc()`)
 - [ ] Missing error wrapping (`fmt.Errorf("context: %w", err)`)
 - [ ] Panics used for recoverable errors
+- [ ] Error messages that leak sensitive information
 
 ### Concurrency
 - [ ] Goroutine leaks (goroutines that never exit)
@@ -50,7 +53,14 @@ For each changed/new file, check ALL of these categories. Do not skip any.
 - [ ] Generated code regenerated after proto changes
 - [ ] Proto changes are backward compatible
 
+### Naming
+- [ ] New public symbols follow Go conventions and project patterns
+- [ ] Input/output field names are clear and unambiguous
+- [ ] Consistent naming with similar existing features
+
 ### Correctness
+- [ ] Delegation: when creating temporary structs to delegate, ALL fields used by the callee are forwarded
+- [ ] Mutation safety: no mutation of shared/input structs; prefer passing overrides
 - [ ] Edge cases: nil inputs, empty slices, zero values handled
 - [ ] Map iteration: output built from map ranges must sort keys for deterministic ordering
 - [ ] `defer cancel()` placed immediately after context creation, before any early returns
@@ -58,20 +68,45 @@ For each changed/new file, check ALL of these categories. Do not skip any.
 ### Dead code
 - [ ] New exported functions have callers outside test files (use `grep` to verify)
 - [ ] New struct fields are read/written somewhere (use `grep` to verify)
+- [ ] No orphaned imports after refactoring
 
-## Phase 3: Coverage analysis
+## Phase 3: Adversarial analysis
+
+For each new feature or behavioral change, actively try to break it:
+- What happens with nil/empty/zero inputs?
+- What happens if a dependency is missing or returns an error?
+- What happens under concurrent access?
+- Can this change cause a regression in existing behavior?
+
+## Phase 4: Cross-file consistency
+
+- [ ] Changes to types/interfaces are reflected in all implementations
+- [ ] Changes to function signatures are reflected in all call sites
+- [ ] New context values have matching With*/FromContext pairs AND tests
+- [ ] Provider schema changes are reflected in provider tests
+
+## Phase 5: Coverage analysis
 
 1. Run `go test -coverprofile=cover.out ./path/to/changed/pkg/...` for each changed package
 2. Run `go tool cover -func=cover.out` to get per-function coverage
-3. Flag any changed function with coverage below 70%
-4. Flag any NEW file with overall coverage below 70%
+3. For **every** changed file:
+   - Flag any changed function with coverage below 70%
+   - Flag any NEW file with overall coverage below 70%
+   - Flag any file with 0% patch coverage as **HIGH** severity
+4. Estimate patch coverage: what percentage of the NEW/CHANGED lines in the diff are exercised by tests?
+   - Target: 70%+ patch coverage overall
+5. For each gap, recommend specific test cases (function name, inputs, expected behavior)
 
-## Phase 4: Self-review (MANDATORY)
+## Phase 6: Self-review (MANDATORY, do not skip)
 
-After completing phases 1-3, review your own findings:
+After completing phases 1-5, review your own findings:
 1. Re-read the full diff one more time
 2. For each file you reviewed, ask: "What did I NOT check?"
-3. Check: did you verify every item in the Phase 2 checklist? If you skipped any, go back now.
+3. For each finding you reported, ask: "Is this the root cause or just a symptom?"
+4. Look for patterns: if you found one delegation bug, are there OTHER delegations with the same problem?
+5. Check: did you verify every item in the Phase 2 checklist? If you skipped any, go back now.
+
+Report any additional findings from the self-review as a separate section.
 
 ## Output format
 
