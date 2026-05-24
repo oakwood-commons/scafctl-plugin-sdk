@@ -71,6 +71,7 @@ type Status struct {
 	ClientID      string       `json:"clientId,omitempty" yaml:"clientId,omitempty"`
 	TokenFile     string       `json:"tokenFile,omitempty" yaml:"tokenFile,omitempty"`
 	Scopes        []string     `json:"scopes,omitempty" yaml:"scopes,omitempty"`
+	Flow          Flow         `json:"flow,omitempty" yaml:"flow,omitempty"`
 }
 
 // Token represents a short-lived access token.

@@ -370,6 +370,7 @@ message GetStatusResponse {
   string token_file = 8;
   repeated string scopes = 9;
   string reason = 10;
+  string flow = 11;
 }
 
 message GetTokenRequest {

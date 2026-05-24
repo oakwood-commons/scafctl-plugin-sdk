@@ -2546,6 +2546,7 @@ type GetStatusResponse struct {
 	TokenFile       string                 `protobuf:"bytes,8,opt,name=token_file,json=tokenFile,proto3" json:"token_file,omitempty"`
 	Scopes          []string               `protobuf:"bytes,9,rep,name=scopes,proto3" json:"scopes,omitempty"`
 	Reason          string                 `protobuf:"bytes,10,opt,name=reason,proto3" json:"reason,omitempty"`
+	Flow            string                 `protobuf:"bytes,11,opt,name=flow,proto3" json:"flow,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -2646,6 +2647,13 @@ func (x *GetStatusResponse) GetScopes() []string {
 func (x *GetStatusResponse) GetReason() string {
 	if x != nil {
 		return x.Reason
+	}
+	return ""
+}
+
+func (x *GetStatusResponse) GetFlow() string {
+	if x != nil {
+		return x.Flow
 	}
 	return ""
 }
@@ -4570,7 +4578,7 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"\x0eLogoutResponse\"O\n" +
 	"\x10GetStatusRequest\x12!\n" +
 	"\fhandler_name\x18\x01 \x01(\tR\vhandlerName\x12\x18\n" +
-	"\aprofile\x18\x02 \x01(\tR\aprofile\"\xe3\x02\n" +
+	"\aprofile\x18\x02 \x01(\tR\aprofile\"\xf7\x02\n" +
 	"\x11GetStatusResponse\x12$\n" +
 	"\rauthenticated\x18\x01 \x01(\bR\rauthenticated\x12&\n" +
 	"\x06claims\x18\x02 \x01(\v2\x0e.plugin.ClaimsR\x06claims\x12&\n" +
@@ -4583,7 +4591,8 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"token_file\x18\b \x01(\tR\ttokenFile\x12\x16\n" +
 	"\x06scopes\x18\t \x03(\tR\x06scopes\x12\x16\n" +
 	"\x06reason\x18\n" +
-	" \x01(\tR\x06reason\"\xbc\x01\n" +
+	" \x01(\tR\x06reason\x12\x12\n" +
+	"\x04flow\x18\v \x01(\tR\x04flow\"\xbc\x01\n" +
 	"\x0fGetTokenRequest\x12!\n" +
 	"\fhandler_name\x18\x01 \x01(\tR\vhandlerName\x12\x14\n" +
 	"\x05scope\x18\x02 \x01(\tR\x05scope\x121\n" +
