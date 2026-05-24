@@ -209,6 +209,7 @@ func TestAuthGRPCServer_GetStatus(t *testing.T) {
 				TenantID:      "t1",
 				IdentityType:  auth.IdentityTypeUser,
 				Scopes:        []string{"read"},
+				Flow:          auth.FlowDeviceCode,
 			}, nil
 		},
 	}}
@@ -218,6 +219,7 @@ func TestAuthGRPCServer_GetStatus(t *testing.T) {
 	assert.Equal(t, "token valid", resp.Reason)
 	assert.Equal(t, "u@x.com", resp.Claims.Email)
 	assert.Equal(t, "t1", resp.TenantId)
+	assert.Equal(t, "device_code", resp.Flow)
 }
 
 func TestAuthGRPCServer_GetStatus_Nil(t *testing.T) {
@@ -707,6 +709,35 @@ func TestStatusToProto_Nil(t *testing.T) {
 	resp := statusToProto(nil)
 	assert.NotNil(t, resp)
 	assert.False(t, resp.Authenticated)
+}
+
+func TestStatusToProto(t *testing.T) {
+	now := time.Now()
+	s := &auth.Status{
+		Authenticated: true,
+		Reason:        "ok",
+		Claims:        &auth.Claims{Email: "u@x.com"},
+		ExpiresAt:     now,
+		LastRefresh:   now.Add(-time.Minute),
+		TenantID:      "t1",
+		IdentityType:  auth.IdentityTypeUser,
+		ClientID:      "c1",
+		TokenFile:     "/tmp/tok",
+		Scopes:        []string{"read", "write"},
+		Flow:          auth.FlowDeviceCode,
+	}
+	resp := statusToProto(s)
+	assert.True(t, resp.Authenticated)
+	assert.Equal(t, "ok", resp.Reason)
+	assert.Equal(t, "u@x.com", resp.Claims.Email)
+	assert.Equal(t, now.Unix(), resp.ExpiresAtUnix)
+	assert.Equal(t, now.Add(-time.Minute).Unix(), resp.LastRefreshUnix)
+	assert.Equal(t, "t1", resp.TenantId)
+	assert.Equal(t, "user", resp.IdentityType)
+	assert.Equal(t, "c1", resp.ClientId)
+	assert.Equal(t, "/tmp/tok", resp.TokenFile)
+	assert.Equal(t, []string{"read", "write"}, resp.Scopes)
+	assert.Equal(t, "device_code", resp.Flow)
 }
 
 func TestTokenResponseToProto_Nil(t *testing.T) {

@@ -309,6 +309,7 @@ func statusToProto(s *auth.Status) *proto.GetStatusResponse {
 		ExpiresAtUnix: safeUnix(s.ExpiresAt), LastRefreshUnix: safeUnix(s.LastRefresh),
 		TenantId: s.TenantID, IdentityType: string(s.IdentityType),
 		ClientId: s.ClientID, TokenFile: s.TokenFile, Scopes: s.Scopes,
+		Flow: string(s.Flow),
 	}
 }
 
