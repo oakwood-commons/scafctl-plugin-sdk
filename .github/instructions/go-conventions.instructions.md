@@ -7,17 +7,21 @@ applyTo: "**/*.go"
 
 ## Struct Tags
 
-Always add JSON/YAML tags on exported structs.
+Always add JSON/YAML tags on exported structs. Use `json:"fieldName"` and `yaml:"fieldName"` on every exported field.
 
 ## Error Handling
 
 Always wrap errors with context:
 
-```go
+~~~go
 if err != nil {
     return fmt.Errorf("failed to create user: %w", err)
 }
-```
+~~~
+
+## Logging
+
+Use `logr.FromContextOrDiscard(ctx)` for all logging -- never `fmt.Printf`, `log.Printf`, or custom loggers.
 
 ## Design Principles
 
@@ -44,3 +48,4 @@ This module is imported by plugin authors. Keep it lightweight:
 - No CEL, OpenTelemetry, Cobra, or other heavy dependencies
 - Only include code that plugins need (not host-side logic)
 - Interface changes are breaking changes -- be careful with `ProviderPlugin` and `AuthHandlerPlugin`
+- Proto field numbers must never change -- only add new fields

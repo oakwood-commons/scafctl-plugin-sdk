@@ -497,6 +497,101 @@ func TestAuthGRPCServer_InjectHostClient_DetectAvailableFlows(t *testing.T) {
 	assert.NotNil(t, HostClientFromContext(capturedCtx))
 }
 
+func TestAuthGRPCServer_ProfilePropagation(t *testing.T) {
+	t.Run("Login", func(t *testing.T) {
+		var capturedCtx context.Context
+		srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
+			login: func(ctx context.Context, _ string, _ LoginRequest, _ func(DeviceCodePrompt)) (*LoginResponse, error) {
+				capturedCtx = ctx
+				return &LoginResponse{Claims: &auth.Claims{Subject: "u"}, ExpiresAt: time.Now().Add(time.Hour)}, nil
+			},
+		}}
+		stream := &mockLoginStream{ctx: context.Background()}
+		err := srv.Login(&proto.LoginRequest{HandlerName: "gh", Profile: "work"}, stream)
+		require.NoError(t, err)
+		assert.Equal(t, "work", auth.ProfileFromContext(capturedCtx))
+	})
+
+	t.Run("Login_empty_profile", func(t *testing.T) {
+		var capturedCtx context.Context
+		srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
+			login: func(ctx context.Context, _ string, _ LoginRequest, _ func(DeviceCodePrompt)) (*LoginResponse, error) {
+				capturedCtx = ctx
+				return &LoginResponse{Claims: &auth.Claims{Subject: "u"}, ExpiresAt: time.Now().Add(time.Hour)}, nil
+			},
+		}}
+		stream := &mockLoginStream{ctx: context.Background()}
+		err := srv.Login(&proto.LoginRequest{HandlerName: "gh"}, stream)
+		require.NoError(t, err)
+		assert.Empty(t, auth.ProfileFromContext(capturedCtx))
+	})
+
+	t.Run("Logout", func(t *testing.T) {
+		var capturedCtx context.Context
+		srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
+			logout: func(ctx context.Context, _ string) error {
+				capturedCtx = ctx
+				return nil
+			},
+		}}
+		_, err := srv.Logout(context.Background(), &proto.LogoutRequest{HandlerName: "gh", Profile: "work"})
+		require.NoError(t, err)
+		assert.Equal(t, "work", auth.ProfileFromContext(capturedCtx))
+	})
+
+	t.Run("GetStatus", func(t *testing.T) {
+		var capturedCtx context.Context
+		srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
+			getStatus: func(ctx context.Context, _ string) (*auth.Status, error) {
+				capturedCtx = ctx
+				return &auth.Status{Authenticated: true}, nil
+			},
+		}}
+		_, err := srv.GetStatus(context.Background(), &proto.GetStatusRequest{HandlerName: "gh", Profile: "prod"})
+		require.NoError(t, err)
+		assert.Equal(t, "prod", auth.ProfileFromContext(capturedCtx))
+	})
+
+	t.Run("GetToken", func(t *testing.T) {
+		var capturedCtx context.Context
+		srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
+			getToken: func(ctx context.Context, _ string, _ TokenRequest) (*TokenResponse, error) {
+				capturedCtx = ctx
+				return &TokenResponse{AccessToken: "t", TokenType: "Bearer", ExpiresAt: time.Now().Add(time.Hour)}, nil
+			},
+		}}
+		_, err := srv.GetToken(context.Background(), &proto.GetTokenRequest{HandlerName: "gh", Profile: "dev"})
+		require.NoError(t, err)
+		assert.Equal(t, "dev", auth.ProfileFromContext(capturedCtx))
+	})
+
+	t.Run("ListCachedTokens", func(t *testing.T) {
+		var capturedCtx context.Context
+		srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
+			listCachedTokens: func(ctx context.Context, _ string) ([]*auth.CachedTokenInfo, error) {
+				capturedCtx = ctx
+				return nil, nil
+			},
+		}}
+		_, err := srv.ListCachedTokens(context.Background(), &proto.ListCachedTokensRequest{HandlerName: "gh", Profile: "staging"})
+		require.NoError(t, err)
+		assert.Equal(t, "staging", auth.ProfileFromContext(capturedCtx))
+	})
+
+	t.Run("PurgeExpiredTokens", func(t *testing.T) {
+		var capturedCtx context.Context
+		srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
+			purgeExpiredTokens: func(ctx context.Context, _ string) (int, error) {
+				capturedCtx = ctx
+				return 0, nil
+			},
+		}}
+		_, err := srv.PurgeExpiredTokens(context.Background(), &proto.PurgeExpiredTokensRequest{HandlerName: "gh", Profile: "corp"})
+		require.NoError(t, err)
+		assert.Equal(t, "corp", auth.ProfileFromContext(capturedCtx))
+	})
+}
+
 func TestAuthGRPCServer_ConfigureAuthHandler_Error(t *testing.T) {
 	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
 		configureAuthHandler: func(_ context.Context, _ string, _ ProviderConfig) error {

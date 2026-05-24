@@ -8,6 +8,7 @@ import (
 	"net"
 	"testing"
 
+	"github.com/oakwood-commons/scafctl-plugin-sdk/auth"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/plugin/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,6 +19,7 @@ import (
 // fakeHostService is a minimal in-process HostService for testing.
 type fakeHostService struct {
 	proto.UnimplementedHostServiceServer
+	lastAuthTokenProfile string // captured from GetAuthToken requests
 }
 
 func (f *fakeHostService) GetSecret(_ context.Context, req *proto.GetSecretRequest) (*proto.GetSecretResponse, error) {
@@ -63,6 +65,7 @@ func (f *fakeHostService) ListAuthHandlers(_ context.Context, _ *proto.ListAuthH
 }
 
 func (f *fakeHostService) GetAuthToken(_ context.Context, req *proto.GetAuthTokenRequest) (*proto.GetAuthTokenResponse, error) {
+	f.lastAuthTokenProfile = req.Profile
 	if req.HandlerName == "error" {
 		return &proto.GetAuthTokenResponse{Error: "token error"}, nil
 	}
@@ -78,18 +81,25 @@ func (f *fakeHostService) GetAuthGroups(_ context.Context, req *proto.GetAuthGro
 
 func startFakeHostService(t *testing.T) (*grpc.ClientConn, func()) {
 	t.Helper()
+	_, conn, cleanup := startFakeHostServiceWithFake(t)
+	return conn, cleanup
+}
+
+func startFakeHostServiceWithFake(t *testing.T) (*fakeHostService, *grpc.ClientConn, func()) {
+	t.Helper()
 	lis, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
+	fake := &fakeHostService{}
 	s := grpc.NewServer()
-	proto.RegisterHostServiceServer(s, &fakeHostService{})
+	proto.RegisterHostServiceServer(s, fake)
 
 	go func() { _ = s.Serve(lis) }()
 
 	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 
-	return conn, func() { conn.Close(); s.Stop() }
+	return fake, conn, func() { conn.Close(); s.Stop() }
 }
 
 func TestHostServiceClient_GetSecret(t *testing.T) {
@@ -230,6 +240,32 @@ func TestHostServiceClient_GetAuthToken_Error(t *testing.T) {
 	_, err := c.GetAuthToken(context.Background(), "error", "", 0, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "token error")
+}
+
+func TestHostServiceClient_GetAuthToken_ProfileFromContext(t *testing.T) {
+	tests := []struct {
+		name    string
+		profile string
+	}{
+		{name: "default profile (empty)", profile: ""},
+		{name: "named profile", profile: "work"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake, conn, cleanup := startFakeHostServiceWithFake(t)
+			defer cleanup()
+			c := NewHostServiceClient(conn)
+
+			ctx := context.Background()
+			if tt.profile != "" {
+				ctx = auth.WithProfile(ctx, tt.profile)
+			}
+			resp, err := c.GetAuthToken(ctx, "gh", "read", 60, false)
+			require.NoError(t, err)
+			assert.Equal(t, "tok123", resp.AccessToken)
+			assert.Equal(t, tt.profile, fake.lastAuthTokenProfile)
+		})
+	}
 }
 
 func TestHostServiceClient_GetAuthGroups(t *testing.T) {

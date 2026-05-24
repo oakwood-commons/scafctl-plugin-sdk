@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/oakwood-commons/scafctl-plugin-sdk/auth"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/plugin/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -102,6 +103,7 @@ func (c *HostServiceClient) GetAuthToken(ctx context.Context, handler, scope str
 		Scope:              scope,
 		MinValidForSeconds: minValidFor,
 		ForceRefresh:       forceRefresh,
+		Profile:            auth.ProfileFromContext(ctx),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("host GetAuthToken: %w", err)
