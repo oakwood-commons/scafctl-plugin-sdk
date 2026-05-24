@@ -427,6 +427,14 @@ tasks:
   # Release Validation
   # ──────────────────────────────────────────────────────────────────────────────
 
+  release:tag:
+    desc: "Create and push a signed release tag (usage: task release:tag VERSION=0.6.0)"
+    requires:
+      vars: [VERSION]
+    cmds:
+      - git tag -s v{{.VERSION}} -m "v{{.VERSION}}"
+      - git push origin v{{.VERSION}}
+
   release:validate:
     desc: "Validate release workflow locally (act dry-run + dependency checks)"
     silent: true
