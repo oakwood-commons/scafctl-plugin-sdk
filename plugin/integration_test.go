@@ -50,6 +50,7 @@ func startProviderServer(t *testing.T, impl plugin.ProviderPlugin) (proto.Plugin
 }
 
 func TestIntegration_ProviderRoundTrip(t *testing.T) {
+	var configuredCfg plugin.ProviderConfig
 	mock := &testutil.MockProviderPlugin{
 		GetProvidersFunc: func(_ context.Context) ([]string, error) {
 			return []string{"echo", "http"}, nil
@@ -86,6 +87,7 @@ func TestIntegration_ProviderRoundTrip(t *testing.T) {
 			}, nil
 		},
 		ConfigureProviderFunc: func(_ context.Context, _ string, cfg plugin.ProviderConfig) error {
+			configuredCfg = cfg
 			if cfg.BinaryName == "" {
 				return errors.New("binary name is required")
 			}
@@ -153,11 +155,14 @@ func TestIntegration_ProviderRoundTrip(t *testing.T) {
 		resp, err := client.ConfigureProvider(ctx, &proto.ConfigureProviderRequest{
 			ProviderName: "echo", BinaryName: "scafctl", Quiet: true, NoColor: true,
 			HostServiceId: 99,
+			Profile:       "work",
 			Settings:      map[string][]byte{"key": []byte(`"value"`)},
 		})
 		require.NoError(t, err)
 		assert.Empty(t, resp.Error)
 		assert.Equal(t, plugin.PluginProtocolVersion, resp.ProtocolVersion)
+		assert.Equal(t, "work", configuredCfg.Profile)
+		assert.Equal(t, uint32(99), configuredCfg.HostServiceID)
 	})
 
 	t.Run("ConfigureProvider_Error", func(t *testing.T) {
@@ -358,6 +363,7 @@ func TestIntegration_ExecuteProviderStream_Error(t *testing.T) {
 type mockAuthPlugin struct {
 	handlers         []plugin.AuthHandlerInfo
 	configuredNames  []string
+	configuredCfgs   []plugin.ProviderConfig
 	loginResult      *plugin.LoginResponse
 	loginErr         error
 	statusResult     *auth.Status
@@ -373,8 +379,9 @@ func (m *mockAuthPlugin) GetAuthHandlers(_ context.Context) ([]plugin.AuthHandle
 	return m.handlers, nil
 }
 
-func (m *mockAuthPlugin) ConfigureAuthHandler(_ context.Context, name string, _ plugin.ProviderConfig) error {
+func (m *mockAuthPlugin) ConfigureAuthHandler(_ context.Context, name string, cfg plugin.ProviderConfig) error {
 	m.configuredNames = append(m.configuredNames, name)
+	m.configuredCfgs = append(m.configuredCfgs, cfg)
 	return nil
 }
 
@@ -520,11 +527,14 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 	t.Run("ConfigureAuthHandler", func(t *testing.T) {
 		resp, err := client.ConfigureAuthHandler(ctx, &proto.ConfigureAuthHandlerRequest{
 			HandlerName: "github", BinaryName: "scafctl", Quiet: true,
+			Profile:  "corp",
 			Settings: map[string][]byte{"org": []byte(`"my-org"`)},
 		})
 		require.NoError(t, err)
 		assert.Empty(t, resp.Error)
 		assert.Equal(t, plugin.PluginProtocolVersion, resp.ProtocolVersion)
+		require.NotEmpty(t, mock.configuredCfgs)
+		assert.Equal(t, "corp", mock.configuredCfgs[len(mock.configuredCfgs)-1].Profile)
 	})
 
 	t.Run("Login", func(t *testing.T) {

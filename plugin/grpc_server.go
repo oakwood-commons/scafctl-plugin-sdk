@@ -14,6 +14,7 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/google/jsonschema-go/jsonschema"
 	goplugin "github.com/hashicorp/go-plugin"
+	"github.com/oakwood-commons/scafctl-plugin-sdk/auth"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/plugin/proto"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/provider"
 	"google.golang.org/grpc"
@@ -83,6 +84,7 @@ func (s *GRPCServer) ConfigureProvider(ctx context.Context, req *proto.Configure
 		NoColor:       req.NoColor,
 		BinaryName:    req.BinaryName,
 		HostServiceID: req.HostServiceId,
+		Profile:       req.Profile,
 		Settings:      settings,
 	}
 	// Dial the host's HostService broker if an ID was provided.
@@ -102,6 +104,7 @@ func (s *GRPCServer) ConfigureProvider(ctx context.Context, req *proto.Configure
 		}
 	}
 	ctx = s.injectHostClient(ctx)
+	ctx = auth.WithProfile(ctx, req.Profile)
 	if err := s.Impl.ConfigureProvider(ctx, req.ProviderName, cfg); err != nil {
 		return &proto.ConfigureProviderResponse{Error: err.Error()}, nil //nolint:nilerr
 	}

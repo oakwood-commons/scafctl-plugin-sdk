@@ -165,7 +165,7 @@ func (s *AuthHandlerGRPCServer) ConfigureAuthHandler(ctx context.Context, req *p
 	for k, v := range req.Settings {
 		settings[k] = json.RawMessage(v)
 	}
-	cfg := ProviderConfig{Quiet: req.Quiet, NoColor: req.NoColor, BinaryName: req.BinaryName, Settings: settings, HostServiceID: req.HostServiceId}
+	cfg := ProviderConfig{Quiet: req.Quiet, NoColor: req.NoColor, BinaryName: req.BinaryName, Profile: req.Profile, Settings: settings, HostServiceID: req.HostServiceId}
 	// Dial the host's HostService broker if an ID was provided and a dial
 	// function is available. When no broker or dialFunc is set (e.g. in tests),
 	// this is a no-op.
@@ -178,6 +178,7 @@ func (s *AuthHandlerGRPCServer) ConfigureAuthHandler(ctx context.Context, req *p
 		}
 	}
 	ctx = s.injectHostClient(ctx)
+	ctx = auth.WithProfile(ctx, req.Profile)
 	if err := s.Impl.ConfigureAuthHandler(ctx, req.HandlerName, cfg); err != nil {
 		s.closeHostClient(ctx)
 		return &proto.ConfigureAuthHandlerResponse{Error: err.Error()}, nil //nolint:nilerr

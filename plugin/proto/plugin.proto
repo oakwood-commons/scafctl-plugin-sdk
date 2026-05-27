@@ -210,6 +210,7 @@ message ConfigureProviderRequest {
   uint32 host_service_id = 5;
   map<string, bytes> settings = 6;
   int32 protocol_version = 7;
+  string profile = 8;
 }
 
 message ConfigureProviderResponse {
@@ -430,6 +431,7 @@ message ConfigureAuthHandlerRequest {
   map<string, bytes> settings = 5;
   uint32 host_service_id = 6;
   int32  protocol_version = 7;
+  string profile = 8;
 }
 
 message ConfigureAuthHandlerResponse {
