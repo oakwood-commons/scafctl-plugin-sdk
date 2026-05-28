@@ -329,3 +329,33 @@ func ValidateDescriptor(desc *Descriptor) error {
 
 	return nil
 }
+
+// DefaultOutputSchemas returns a minimal valid output schema map for the given
+// capabilities, pre-populated with the required fields that ValidateDescriptor
+// enforces. Providers may extend the returned schemas with additional properties.
+//
+// Capabilities that have no required fields (CapabilityFrom, CapabilityTransform)
+// receive an empty object schema. Callers must add any provider-specific output
+// fields on top of the returned map.
+func DefaultOutputSchemas(caps ...Capability) map[Capability]*jsonschema.Schema {
+	schemas := make(map[Capability]*jsonschema.Schema, len(caps))
+	for _, c := range caps {
+		schemas[c] = defaultSchemaForCapability(c)
+	}
+	return schemas
+}
+
+// defaultSchemaForCapability builds the minimal JSON Schema for a given
+// capability, including only the fields that ValidateDescriptor requires.
+func defaultSchemaForCapability(c Capability) *jsonschema.Schema {
+	required := getCapabilityRequiredFields(c)
+	props := make(map[string]*jsonschema.Schema, len(required))
+	for field, typ := range required {
+		props[field] = &jsonschema.Schema{Type: typ}
+	}
+	s := &jsonschema.Schema{
+		Type:       "object",
+		Properties: props,
+	}
+	return s
+}

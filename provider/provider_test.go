@@ -328,3 +328,62 @@ func TestDescriptor_IsWriteOperation(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultOutputSchemas(t *testing.T) {
+	t.Run("returns schema map for requested capabilities", func(t *testing.T) {
+		schemas := DefaultOutputSchemas(CapabilityValidation, CapabilityAction, CapabilityFrom)
+		assert.Len(t, schemas, 3)
+
+		vs := schemas[CapabilityValidation]
+		require.NotNil(t, vs)
+		assert.Equal(t, "object", vs.Type)
+		require.Contains(t, vs.Properties, "valid")
+		assert.Equal(t, "boolean", vs.Properties["valid"].Type)
+		require.Contains(t, vs.Properties, "errors")
+		assert.Equal(t, "array", vs.Properties["errors"].Type)
+
+		as := schemas[CapabilityAction]
+		require.NotNil(t, as)
+		require.Contains(t, as.Properties, "success")
+		assert.Equal(t, "boolean", as.Properties["success"].Type)
+
+		fs := schemas[CapabilityFrom]
+		require.NotNil(t, fs)
+		assert.Equal(t, "object", fs.Type)
+	})
+
+	t.Run("returned schemas pass ValidateDescriptor", func(t *testing.T) {
+		caps := []Capability{CapabilityAuthentication}
+		desc := &Descriptor{
+			Name:          "test",
+			DisplayName:   "Test",
+			APIVersion:    "v1",
+			Version:       semver.MustParse("1.0.0"),
+			Capabilities:  caps,
+			OutputSchemas: DefaultOutputSchemas(caps...),
+		}
+		// Should not fail due to missing required fields.
+		err := ValidateDescriptor(desc)
+		assert.NoError(t, err)
+	})
+
+	t.Run("empty call returns empty map", func(t *testing.T) {
+		schemas := DefaultOutputSchemas()
+		assert.Empty(t, schemas)
+	})
+
+	t.Run("callers can extend returned schemas", func(t *testing.T) {
+		schemas := DefaultOutputSchemas(CapabilityTransform)
+		schemas[CapabilityTransform].Properties["result"] = &jsonschema.Schema{Type: "string"}
+		assert.Contains(t, schemas[CapabilityTransform].Properties, "result")
+	})
+}
+
+func TestDefaultOutputSchemas_UnknownCapability(t *testing.T) {
+	schemas := DefaultOutputSchemas(Capability("unknown"))
+	require.Contains(t, schemas, Capability("unknown"))
+	s := schemas[Capability("unknown")]
+	require.NotNil(t, s)
+	assert.Equal(t, "object", s.Type)
+	assert.Empty(t, s.Properties)
+}

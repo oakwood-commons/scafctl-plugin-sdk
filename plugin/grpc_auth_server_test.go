@@ -293,13 +293,14 @@ func TestAuthGRPCServer_ConfigureAuthHandler(t *testing.T) {
 	}
 	resp, err := srv.ConfigureAuthHandler(context.Background(), &proto.ConfigureAuthHandlerRequest{
 		HandlerName: "gh", Quiet: true, NoColor: true, BinaryName: "bin",
-		HostServiceId: 42, Settings: map[string][]byte{"k": []byte(`"v"`)},
+		HostServiceId: 42, Profile: "corp", Settings: map[string][]byte{"k": []byte(`"v"`)},
 	})
 	require.NoError(t, err)
 	assert.Empty(t, resp.Error)
 	assert.Equal(t, PluginProtocolVersion, resp.ProtocolVersion)
 	assert.True(t, gotCfg.Quiet)
 	assert.Equal(t, uint32(42), gotCfg.HostServiceID)
+	assert.Equal(t, "corp", gotCfg.Profile)
 	assert.NotNil(t, srv.hostClient, "hostClient should be set after dial")
 	assert.NotNil(t, srv.conn, "conn should be stored for cleanup")
 	require.NotNil(t, capturedCtx)

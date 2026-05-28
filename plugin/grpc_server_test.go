@@ -7,10 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/google/jsonschema-go/jsonschema"
+	goplugin "github.com/hashicorp/go-plugin"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/plugin/proto"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/provider"
 	"github.com/stretchr/testify/assert"
@@ -192,7 +194,7 @@ func TestGRPCServer_ConfigureProvider(t *testing.T) {
 	}}
 	resp, err := srv.ConfigureProvider(context.Background(), &proto.ConfigureProviderRequest{
 		ProviderName: "test", Quiet: true, NoColor: true, BinaryName: "bin",
-		HostServiceId: 42, Settings: map[string][]byte{"k": []byte(`"v"`)},
+		HostServiceId: 42, Profile: "work", Settings: map[string][]byte{"k": []byte(`"v"`)},
 	})
 	require.NoError(t, err)
 	assert.Empty(t, resp.Error)
@@ -201,6 +203,7 @@ func TestGRPCServer_ConfigureProvider(t *testing.T) {
 	assert.True(t, gotCfg.NoColor)
 	assert.Equal(t, "bin", gotCfg.BinaryName)
 	assert.Equal(t, uint32(42), gotCfg.HostServiceID)
+	assert.Equal(t, "work", gotCfg.Profile)
 }
 
 func TestGRPCServer_ConfigureProvider_Error(t *testing.T) {
@@ -868,4 +871,77 @@ func TestGRPCServer_StopProvider_ClosesConn(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, srv.conn, "conn should be nil after StopProvider")
 	assert.Nil(t, srv.hostClient, "hostClient should be nil after StopProvider")
+}
+
+type failingStream struct {
+	proto.PluginService_ExecuteProviderStreamServer
+	calls int
+}
+
+func (s *failingStream) Send(_ *proto.ExecuteProviderStreamChunk) error {
+	s.calls++
+	return errors.New("send failed")
+}
+
+func TestGRPCServer_PickDialFunc(t *testing.T) {
+	t.Run("dialFunc override is preferred", func(t *testing.T) {
+		called := false
+		srv := &GRPCServer{
+			dialFunc: func(id uint32) (*grpc.ClientConn, error) {
+				called = (id == 7)
+				return nil, nil
+			},
+			broker: &goplugin.GRPCBroker{},
+		}
+
+		dial := srv.pickDialFunc()
+		require.NotNil(t, dial)
+		_, err := dial(7)
+		require.NoError(t, err)
+		assert.True(t, called)
+	})
+
+	t.Run("broker dial is used when override is absent", func(t *testing.T) {
+		srv := &GRPCServer{broker: &goplugin.GRPCBroker{}}
+		assert.NotNil(t, srv.pickDialFunc())
+	})
+
+	t.Run("nil when neither override nor broker is set", func(t *testing.T) {
+		srv := &GRPCServer{}
+		assert.Nil(t, srv.pickDialFunc())
+	})
+}
+
+func TestStreamForwarder_Forward(t *testing.T) {
+	t.Run("forwards stdout chunks", func(t *testing.T) {
+		stream := &mockStream{ctx: context.Background()}
+		fwd := newStreamForwarder(stream)
+
+		fwd.forward(StreamChunk{Stdout: []byte("hello")})
+
+		require.Len(t, stream.chunks, 1)
+		assert.Equal(t, []byte("hello"), stream.chunks[0].GetStdout())
+	})
+
+	t.Run("encodes marshal error into result error", func(t *testing.T) {
+		stream := &mockStream{ctx: context.Background()}
+		fwd := newStreamForwarder(stream)
+
+		fwd.forward(StreamChunk{Result: &provider.Output{Data: map[string]any{"bad": math.NaN()}}})
+
+		require.Len(t, stream.chunks, 1)
+		res := stream.chunks[0].GetResult()
+		require.NotNil(t, res)
+		assert.Contains(t, res.Error, "failed to encode output")
+	})
+
+	t.Run("stops forwarding after send error", func(t *testing.T) {
+		stream := &failingStream{}
+		fwd := newStreamForwarder(stream)
+
+		fwd.forward(StreamChunk{Stdout: []byte("first")})
+		fwd.forward(StreamChunk{Stderr: []byte("second")})
+
+		assert.Equal(t, 1, stream.calls)
+	})
 }

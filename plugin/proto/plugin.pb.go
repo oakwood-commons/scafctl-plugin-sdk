@@ -995,6 +995,7 @@ type ConfigureProviderRequest struct {
 	HostServiceId   uint32                 `protobuf:"varint,5,opt,name=host_service_id,json=hostServiceId,proto3" json:"host_service_id,omitempty"`
 	Settings        map[string][]byte      `protobuf:"bytes,6,rep,name=settings,proto3" json:"settings,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	ProtocolVersion int32                  `protobuf:"varint,7,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
+	Profile         string                 `protobuf:"bytes,8,opt,name=profile,proto3" json:"profile,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1076,6 +1077,13 @@ func (x *ConfigureProviderRequest) GetProtocolVersion() int32 {
 		return x.ProtocolVersion
 	}
 	return 0
+}
+
+func (x *ConfigureProviderRequest) GetProfile() string {
+	if x != nil {
+		return x.Profile
+	}
+	return ""
 }
 
 type ConfigureProviderResponse struct {
@@ -3143,6 +3151,7 @@ type ConfigureAuthHandlerRequest struct {
 	Settings        map[string][]byte      `protobuf:"bytes,5,rep,name=settings,proto3" json:"settings,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	HostServiceId   uint32                 `protobuf:"varint,6,opt,name=host_service_id,json=hostServiceId,proto3" json:"host_service_id,omitempty"`
 	ProtocolVersion int32                  `protobuf:"varint,7,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
+	Profile         string                 `protobuf:"bytes,8,opt,name=profile,proto3" json:"profile,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -3224,6 +3233,13 @@ func (x *ConfigureAuthHandlerRequest) GetProtocolVersion() int32 {
 		return x.ProtocolVersion
 	}
 	return 0
+}
+
+func (x *ConfigureAuthHandlerRequest) GetProfile() string {
+	if x != nil {
+		return x.Profile
+	}
+	return ""
 }
 
 type ConfigureAuthHandlerResponse struct {
@@ -4464,7 +4480,7 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"\n" +
 	"parameters\x18\v \x01(\fR\n" +
 	"parameters\x12A\n" +
-	"\x11solution_metadata\x18\f \x01(\v2\x14.plugin.SolutionMetaR\x10solutionMetadata\"\xed\x02\n" +
+	"\x11solution_metadata\x18\f \x01(\v2\x14.plugin.SolutionMetaR\x10solutionMetadata\"\x87\x03\n" +
 	"\x18ConfigureProviderRequest\x12#\n" +
 	"\rprovider_name\x18\x01 \x01(\tR\fproviderName\x12\x14\n" +
 	"\x05quiet\x18\x02 \x01(\bR\x05quiet\x12\x19\n" +
@@ -4473,7 +4489,8 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"binaryName\x12&\n" +
 	"\x0fhost_service_id\x18\x05 \x01(\rR\rhostServiceId\x12J\n" +
 	"\bsettings\x18\x06 \x03(\v2..plugin.ConfigureProviderRequest.SettingsEntryR\bsettings\x12)\n" +
-	"\x10protocol_version\x18\a \x01(\x05R\x0fprotocolVersion\x1a;\n" +
+	"\x10protocol_version\x18\a \x01(\x05R\x0fprotocolVersion\x12\x18\n" +
+	"\aprofile\x18\b \x01(\tR\aprofile\x1a;\n" +
 	"\rSettingsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\fR\x05value:\x028\x01\"\x92\x01\n" +
@@ -4634,7 +4651,7 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"\fhandler_name\x18\x01 \x01(\tR\vhandlerName\x12\x18\n" +
 	"\aprofile\x18\x02 \x01(\tR\aprofile\"?\n" +
 	"\x1aPurgeExpiredTokensResponse\x12!\n" +
-	"\fpurged_count\x18\x01 \x01(\x05R\vpurgedCount\"\xf1\x02\n" +
+	"\fpurged_count\x18\x01 \x01(\x05R\vpurgedCount\"\x8b\x03\n" +
 	"\x1bConfigureAuthHandlerRequest\x12!\n" +
 	"\fhandler_name\x18\x01 \x01(\tR\vhandlerName\x12\x14\n" +
 	"\x05quiet\x18\x02 \x01(\bR\x05quiet\x12\x19\n" +
@@ -4643,7 +4660,8 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"binaryName\x12M\n" +
 	"\bsettings\x18\x05 \x03(\v21.plugin.ConfigureAuthHandlerRequest.SettingsEntryR\bsettings\x12&\n" +
 	"\x0fhost_service_id\x18\x06 \x01(\rR\rhostServiceId\x12)\n" +
-	"\x10protocol_version\x18\a \x01(\x05R\x0fprotocolVersion\x1a;\n" +
+	"\x10protocol_version\x18\a \x01(\x05R\x0fprotocolVersion\x12\x18\n" +
+	"\aprofile\x18\b \x01(\tR\aprofile\x1a;\n" +
 	"\rSettingsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\fR\x05value:\x028\x01\"\x95\x01\n" +

@@ -48,13 +48,11 @@ func (p *EchoPlugin) GetProviderDescriptor(_ context.Context, providerName strin
 				),
 			},
 		),
-		OutputSchemas: map[provider.Capability]*jsonschema.Schema{
-			provider.CapabilityTransform: schemahelper.ObjectSchema(nil,
-				map[string]*jsonschema.Schema{
-					"echoed": schemahelper.StringProp("The echoed message"),
-				},
-			),
-		},
+		OutputSchemas: func() map[provider.Capability]*jsonschema.Schema {
+			schemas := provider.DefaultOutputSchemas(provider.CapabilityTransform)
+			schemas[provider.CapabilityTransform].Properties["echoed"] = schemahelper.StringProp("The echoed message")
+			return schemas
+		}(),
 	}, nil
 }
 

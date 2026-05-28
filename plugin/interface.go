@@ -23,6 +23,7 @@ type ProviderConfig struct {
 	NoColor       bool                       `json:"noColor" yaml:"noColor"`
 	BinaryName    string                     `json:"binaryName" yaml:"binaryName"`
 	HostServiceID uint32                     `json:"hostServiceId,omitempty" yaml:"hostServiceId,omitempty"`
+	Profile       string                     `json:"profile,omitempty" yaml:"profile,omitempty"`
 	Settings      map[string]json.RawMessage `json:"settings,omitempty" yaml:"settings,omitempty"`
 }
 
