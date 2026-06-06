@@ -868,6 +868,7 @@ type ExecuteProviderRequest struct {
 	IterationContext *IterationContext      `protobuf:"bytes,10,opt,name=iteration_context,json=iterationContext,proto3" json:"iteration_context,omitempty"`
 	Parameters       []byte                 `protobuf:"bytes,11,opt,name=parameters,proto3" json:"parameters,omitempty"`
 	SolutionMetadata *SolutionMeta          `protobuf:"bytes,12,opt,name=solution_metadata,json=solutionMetadata,proto3" json:"solution_metadata,omitempty"`
+	AuthProfile      string                 `protobuf:"bytes,13,opt,name=auth_profile,json=authProfile,proto3" json:"auth_profile,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -984,6 +985,13 @@ func (x *ExecuteProviderRequest) GetSolutionMetadata() *SolutionMeta {
 		return x.SolutionMetadata
 	}
 	return nil
+}
+
+func (x *ExecuteProviderRequest) GetAuthProfile() string {
+	if x != nil {
+		return x.AuthProfile
+	}
+	return ""
 }
 
 type ConfigureProviderRequest struct {
@@ -4464,7 +4472,7 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"\vhas_maximum\x18\x13 \x01(\bR\n" +
 	"hasMaximum\x122\n" +
 	"\x15has_exclusive_minimum\x18\x14 \x01(\bR\x13hasExclusiveMinimum\x122\n" +
-	"\x15has_exclusive_maximum\x18\x15 \x01(\bR\x13hasExclusiveMaximum\"\xf4\x03\n" +
+	"\x15has_exclusive_maximum\x18\x15 \x01(\bR\x13hasExclusiveMaximum\"\x97\x04\n" +
 	"\x16ExecuteProviderRequest\x12#\n" +
 	"\rprovider_name\x18\x01 \x01(\tR\fproviderName\x12\x14\n" +
 	"\x05input\x18\x02 \x01(\fR\x05input\x12\x18\n" +
@@ -4480,7 +4488,8 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"\n" +
 	"parameters\x18\v \x01(\fR\n" +
 	"parameters\x12A\n" +
-	"\x11solution_metadata\x18\f \x01(\v2\x14.plugin.SolutionMetaR\x10solutionMetadata\"\x87\x03\n" +
+	"\x11solution_metadata\x18\f \x01(\v2\x14.plugin.SolutionMetaR\x10solutionMetadata\x12!\n" +
+	"\fauth_profile\x18\r \x01(\tR\vauthProfile\"\x87\x03\n" +
 	"\x18ConfigureProviderRequest\x12#\n" +
 	"\rprovider_name\x18\x01 \x01(\tR\fproviderName\x12\x14\n" +
 	"\x05quiet\x18\x02 \x01(\bR\x05quiet\x12\x19\n" +

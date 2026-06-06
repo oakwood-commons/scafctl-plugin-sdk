@@ -51,6 +51,7 @@ func startProviderServer(t *testing.T, impl plugin.ProviderPlugin) (proto.Plugin
 
 func TestIntegration_ProviderRoundTrip(t *testing.T) {
 	var configuredCfg plugin.ProviderConfig
+	var capturedProfile string
 	mock := &testutil.MockProviderPlugin{
 		GetProvidersFunc: func(_ context.Context) ([]string, error) {
 			return []string{"echo", "http"}, nil
@@ -78,7 +79,8 @@ func TestIntegration_ProviderRoundTrip(t *testing.T) {
 				Maintainers: []provider.Contact{{Name: "Test", Email: "test@example.com"}},
 			}, nil
 		},
-		ExecuteProviderFunc: func(_ context.Context, _ string, input map[string]any) (*provider.Output, error) {
+		ExecuteProviderFunc: func(ctx context.Context, _ string, input map[string]any) (*provider.Output, error) {
+			capturedProfile = auth.ProfileFromContext(ctx)
 			msg, _ := input["message"].(string)
 			return &provider.Output{
 				Data:     map[string]any{"echoed": msg},
@@ -221,9 +223,11 @@ func TestIntegration_ProviderRoundTrip(t *testing.T) {
 				Name: "my-sol", Version: "1.0.0", DisplayName: "My Solution",
 				Description: "Test solution", Category: "infra", Tags: []string{"ci"},
 			},
+			AuthProfile: "personal",
 		})
 		require.NoError(t, err)
 		assert.Empty(t, resp.Error)
+		assert.Equal(t, "personal", capturedProfile)
 	})
 
 	t.Run("DescribeWhatIf", func(t *testing.T) {

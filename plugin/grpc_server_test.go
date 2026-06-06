@@ -13,6 +13,7 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/google/jsonschema-go/jsonschema"
 	goplugin "github.com/hashicorp/go-plugin"
+	"github.com/oakwood-commons/scafctl-plugin-sdk/auth"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/plugin/proto"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/provider"
 	"github.com/stretchr/testify/assert"
@@ -396,6 +397,7 @@ func TestApplyRequestContext(t *testing.T) {
 			Name: "sol", Version: "2.0.0", DisplayName: "Sol",
 			Description: "desc", Category: "infra", Tags: []string{"t1"},
 		},
+		AuthProfile: "work",
 	}
 
 	ctx, err := applyRequestContext(ctx, req)
@@ -439,6 +441,8 @@ func TestApplyRequestContext(t *testing.T) {
 	meta, ok := provider.SolutionMetadataFromContext(ctx)
 	assert.True(t, ok)
 	assert.Equal(t, "sol", meta.Name)
+
+	assert.Equal(t, "work", auth.ProfileFromContext(ctx))
 }
 
 func TestApplyRequestContext_InvalidContext(t *testing.T) {
@@ -476,6 +480,26 @@ func TestUnmarshalIterationContext_Nil(t *testing.T) {
 	require.NoError(t, err)
 	_, ok := provider.IterationContextFromContext(ctx)
 	assert.False(t, ok)
+}
+
+func TestApplyRequestContext_AuthProfileEmpty(t *testing.T) {
+	ctx, err := applyRequestContext(context.Background(), &proto.ExecuteProviderRequest{})
+	require.NoError(t, err)
+	assert.Empty(t, auth.ProfileFromContext(ctx))
+}
+
+func TestNewGRPCServer(t *testing.T) {
+	t.Run("nil options", func(t *testing.T) {
+		s := newGRPCServer(nil)
+		require.NotNil(t, s)
+		s.Stop()
+	})
+
+	t.Run("preserves existing options", func(t *testing.T) {
+		s := newGRPCServer([]grpc.ServerOption{grpc.MaxConcurrentStreams(10)})
+		require.NotNil(t, s)
+		s.Stop()
+	})
 }
 
 // --- Descriptor conversion round-trip ---

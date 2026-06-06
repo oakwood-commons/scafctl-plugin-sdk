@@ -200,6 +200,7 @@ message ExecuteProviderRequest {
   IterationContext iteration_context = 10;
   bytes parameters = 11;
   SolutionMeta solution_metadata = 12;
+  string auth_profile = 13;
 }
 
 message ConfigureProviderRequest {

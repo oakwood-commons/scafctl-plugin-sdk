@@ -281,6 +281,9 @@ func applyRequestContext(ctx context.Context, req *proto.ExecuteProviderRequest)
 		ctx = provider.WithParameters(ctx, params)
 	}
 	ctx = unmarshalSolutionMeta(ctx, req.SolutionMetadata)
+	if req.AuthProfile != "" {
+		ctx = auth.WithProfile(ctx, req.AuthProfile)
+	}
 	return ctx, nil
 }
 
