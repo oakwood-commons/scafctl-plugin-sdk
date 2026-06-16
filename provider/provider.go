@@ -61,6 +61,7 @@ type Descriptor struct {
 	//   - validation: must include "valid" (boolean) and "errors" (array)
 	//   - authentication: must include "authenticated" (boolean) and "token" (string)
 	//   - action: must include "success" (boolean)
+	//   - state: must include "success" (boolean)
 	//   - from: no required fields
 	//   - transform: no required fields
 	OutputSchemas map[Capability]*jsonschema.Schema `json:"outputSchemas" yaml:"outputSchemas" doc:"Output schemas per capability (JSON Schema)" required:"true"`
@@ -196,12 +197,13 @@ const (
 	CapabilityValidation     Capability = "validation"
 	CapabilityAuthentication Capability = "authentication"
 	CapabilityAction         Capability = "action"
+	CapabilityState          Capability = "state"
 )
 
 // IsValid checks if the capability is valid.
 func (c Capability) IsValid() bool {
 	switch c {
-	case CapabilityFrom, CapabilityTransform, CapabilityValidation, CapabilityAuthentication, CapabilityAction:
+	case CapabilityFrom, CapabilityTransform, CapabilityValidation, CapabilityAuthentication, CapabilityAction, CapabilityState:
 		return true
 	default:
 		return false
@@ -246,7 +248,7 @@ func getCapabilityRequiredFields(capability Capability) map[string]string {
 			"authenticated": "boolean",
 			"token":         "string",
 		}
-	case CapabilityAction:
+	case CapabilityAction, CapabilityState:
 		return map[string]string{
 			"success": "boolean",
 		}

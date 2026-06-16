@@ -25,6 +25,7 @@ func TestCapability_IsValid(t *testing.T) {
 		{name: "validation", cap: CapabilityValidation, expected: true},
 		{name: "authentication", cap: CapabilityAuthentication, expected: true},
 		{name: "action", cap: CapabilityAction, expected: true},
+		{name: "state", cap: CapabilityState, expected: true},
 		{name: "invalid", cap: Capability("invalid"), expected: false},
 		{name: "empty", cap: Capability(""), expected: false},
 	}
@@ -254,6 +255,31 @@ func TestValidateDescriptor(t *testing.T) {
 		assert.Contains(t, err.Error(), `unknown capability "unknown-cap"`)
 	})
 
+	t.Run("state requires success", func(t *testing.T) {
+		d := validDescriptor()
+		d.Capabilities = []Capability{CapabilityState}
+		d.OutputSchemas = map[Capability]*jsonschema.Schema{
+			CapabilityState: {Type: "object", Properties: map[string]*jsonschema.Schema{}},
+		}
+		err := ValidateDescriptor(d)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires output field")
+	})
+
+	t.Run("state with correct fields", func(t *testing.T) {
+		d := validDescriptor()
+		d.Capabilities = []Capability{CapabilityState}
+		d.OutputSchemas = map[Capability]*jsonschema.Schema{
+			CapabilityState: {
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					"success": {Type: "boolean"},
+				},
+			},
+		}
+		require.NoError(t, ValidateDescriptor(d))
+	})
+
 	t.Run("write operations nil is valid", func(t *testing.T) {
 		d := validDescriptor()
 		d.WriteOperations = nil
@@ -353,18 +379,29 @@ func TestDefaultOutputSchemas(t *testing.T) {
 	})
 
 	t.Run("returned schemas pass ValidateDescriptor", func(t *testing.T) {
-		caps := []Capability{CapabilityAuthentication}
-		desc := &Descriptor{
-			Name:          "test",
-			DisplayName:   "Test",
-			APIVersion:    "v1",
-			Version:       semver.MustParse("1.0.0"),
-			Capabilities:  caps,
-			OutputSchemas: DefaultOutputSchemas(caps...),
+		// Cover all capabilities (including those without required output
+		// fields) to prevent future breakage if a capability is accidentally
+		// omitted from DefaultOutputSchemas/getCapabilityRequiredFields.
+		for _, caps := range [][]Capability{
+			{CapabilityAuthentication},
+			{CapabilityState},
+			{CapabilityAction},
+			{CapabilityValidation},
+			{CapabilityFrom, CapabilityTransform},
+			{CapabilityFrom, CapabilityValidation, CapabilityAction, CapabilityState},
+		} {
+			desc := &Descriptor{
+				Name:          "test",
+				DisplayName:   "Test",
+				APIVersion:    "v1",
+				Version:       semver.MustParse("1.0.0"),
+				Capabilities:  caps,
+				OutputSchemas: DefaultOutputSchemas(caps...),
+			}
+			// Should not fail due to missing required fields.
+			err := ValidateDescriptor(desc)
+			assert.NoError(t, err, "capabilities: %v", caps)
 		}
-		// Should not fail due to missing required fields.
-		err := ValidateDescriptor(desc)
-		assert.NoError(t, err)
 	})
 
 	t.Run("empty call returns empty map", func(t *testing.T) {

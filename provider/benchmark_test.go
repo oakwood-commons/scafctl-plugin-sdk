@@ -67,7 +67,7 @@ func BenchmarkContextRoundTrip_Full(b *testing.B) {
 // ---- Capability benchmarks ----
 
 func BenchmarkCapability_IsValid(b *testing.B) {
-	caps := []Capability{CapabilityFrom, CapabilityTransform, CapabilityValidation, CapabilityAuthentication, CapabilityAction, "invalid"}
+	caps := []Capability{CapabilityFrom, CapabilityTransform, CapabilityValidation, CapabilityAuthentication, CapabilityAction, CapabilityState, "invalid"}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
