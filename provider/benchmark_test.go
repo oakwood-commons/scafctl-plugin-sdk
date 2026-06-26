@@ -67,7 +67,7 @@ func BenchmarkContextRoundTrip_Full(b *testing.B) {
 // ---- Capability benchmarks ----
 
 func BenchmarkCapability_IsValid(b *testing.B) {
-	caps := []Capability{CapabilityFrom, CapabilityTransform, CapabilityValidation, CapabilityAuthentication, CapabilityAction, CapabilityState, "invalid"}
+	caps := []Capability{CapabilityFrom, CapabilityTransform, CapabilityValidation, CapabilityAuthentication, CapabilityAction, CapabilityState, CapabilityKubeconfig, "invalid"}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
@@ -189,5 +189,50 @@ func BenchmarkDescriptor_Helpers(b *testing.B) {
 	for b.Loop() {
 		_ = desc.IsSensitiveField("password")
 		_ = desc.DescribeWhatIf(context.Background(), nil)
+	}
+}
+
+func BenchmarkDescriptor_OperationHelpers(b *testing.B) {
+	desc := &Descriptor{
+		Name: "ops-provider", APIVersion: "v1", Version: semver.MustParse("1.0.0"),
+		Capabilities: []Capability{CapabilityAction},
+		Operations: []OperationDescriptor{
+			{Name: "create_issue", IsWrite: true, Capabilities: []Capability{CapabilityAction}},
+			{Name: "get_issue", Capabilities: []Capability{CapabilityAction}},
+			{Name: "delete_issue", IsWrite: true, Capabilities: []Capability{CapabilityAction}},
+		},
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_ = desc.IsWriteOperation("delete_issue")
+		_ = desc.EffectiveWriteOperations()
+		_ = desc.GetOperation("get_issue")
+		_ = desc.OperationNames()
+	}
+}
+
+func BenchmarkValidateDescriptor_Operations(b *testing.B) {
+	desc := &Descriptor{
+		Name: "ops-provider", APIVersion: "v1", Version: semver.MustParse("1.0.0"),
+		Description:  "A provider with rich operation metadata",
+		Capabilities: []Capability{CapabilityTransform, CapabilityAction},
+		OutputSchemas: map[Capability]*jsonschema.Schema{
+			CapabilityTransform: {Type: "object"},
+			CapabilityAction:    {Type: "object", Properties: map[string]*jsonschema.Schema{"success": {Type: "boolean"}}},
+		},
+		WriteOperations: []string{"create_issue", "delete_issue"},
+		Operations: []OperationDescriptor{
+			{Name: "create_issue", IsWrite: true, Capabilities: []Capability{CapabilityAction}},
+			{Name: "get_issue", Capabilities: []Capability{CapabilityTransform}},
+			{Name: "delete_issue", IsWrite: true, Capabilities: []Capability{CapabilityAction}},
+		},
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_ = ValidateDescriptor(desc)
 	}
 }

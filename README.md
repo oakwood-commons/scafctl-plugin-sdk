@@ -91,7 +91,7 @@ func main() {
 | Package | Purpose |
 |---------|---------|
 | `plugin/` | Core plugin framework: interfaces, gRPC wiring, `Serve()` / `ServeAuthHandler()` entry points |
-| `provider/` | Provider types: `Descriptor`, `Output`, `Capability`, context helpers |
+| `provider/` | Provider types: `Descriptor`, `OperationDescriptor`, `Output`, `Capability`, context helpers |
 | `provider/schemahelper/` | JSON Schema builder helpers for provider input schemas |
 | `auth/` | Auth handler types: `Flow`, `Claims`, `Token`, `Status`, capabilities |
 | `testutil/` | `MockProviderPlugin` for integration testing |

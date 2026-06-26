@@ -98,6 +98,31 @@ func BenchmarkParamToProto(b *testing.B) {
 	}
 }
 
+func BenchmarkOperationsConversion(b *testing.B) {
+	ops := []provider.OperationDescriptor{
+		{
+			Name: "create_issue", DisplayName: "Create Issue", Description: "creates an issue",
+			IsWrite: true, Capabilities: []provider.Capability{provider.CapabilityAction},
+			Tags: []string{"write", "issues"},
+			InputSchema: &jsonschema.Schema{
+				Type:       "object",
+				Properties: map[string]*jsonschema.Schema{"title": {Type: "string"}},
+			},
+			OutputSchema: &jsonschema.Schema{
+				Type:       "object",
+				Properties: map[string]*jsonschema.Schema{"id": {Type: "string"}},
+			},
+		},
+		{Name: "get_issue", Description: "reads an issue", Capabilities: []provider.Capability{provider.CapabilityFrom}},
+		{Name: "delete_issue", IsWrite: true, Capabilities: []provider.Capability{provider.CapabilityAction}},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_ = protoToOperations(operationsToProto(ops))
+	}
+}
+
 // ---- Context application benchmarks ----
 
 func BenchmarkApplyRequestContext(b *testing.B) {

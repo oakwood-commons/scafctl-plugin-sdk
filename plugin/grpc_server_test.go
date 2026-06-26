@@ -521,9 +521,26 @@ func TestDescriptorRoundTrip(t *testing.T) {
 		Capabilities:    []provider.Capability{provider.CapabilityTransform, provider.CapabilityFrom},
 		SensitiveFields: []string{"secret"},
 		WriteOperations: []string{"create_label", "delete_label"},
-		Links:           []provider.Link{{Name: "docs", URL: "https://example.com"}},
-		Examples:        []provider.Example{{Name: "ex1", Description: "desc", YAML: "yaml: true"}},
-		Maintainers:     []provider.Contact{{Name: "Jane", Email: "jane@ex.com"}},
+		Operations: []provider.OperationDescriptor{
+			{
+				Name: "create_label", DisplayName: "Create Label", Description: "creates a label",
+				Capabilities: []provider.Capability{provider.CapabilityTransform}, IsWrite: true,
+				Tags: []string{"label"}, IsDeprecated: true, DeprecationMessage: "use create_label_v2",
+				InputSchema: &jsonschema.Schema{
+					Type:       "object",
+					Properties: map[string]*jsonschema.Schema{"label": {Type: "string"}},
+				},
+				OutputSchema: &jsonschema.Schema{
+					Type:       "object",
+					Properties: map[string]*jsonschema.Schema{"id": {Type: "string"}},
+				},
+				Examples: []provider.Example{{Name: "ex", Description: "d", YAML: "yaml: 1"}},
+			},
+			{Name: "list_labels", Description: "lists labels"},
+		},
+		Links:       []provider.Link{{Name: "docs", URL: "https://example.com"}},
+		Examples:    []provider.Example{{Name: "ex1", Description: "desc", YAML: "yaml: true"}},
+		Maintainers: []provider.Contact{{Name: "Jane", Email: "jane@ex.com"}},
 		Schema: &jsonschema.Schema{
 			Type: "object",
 			Properties: map[string]*jsonschema.Schema{
@@ -566,6 +583,11 @@ func TestDescriptorRoundTrip(t *testing.T) {
 	assert.NotNil(t, pd.Schema)
 	assert.NotNil(t, pd.RawSchema)
 	assert.Equal(t, []string{"create_label", "delete_label"}, pd.WriteOperations)
+	require.Len(t, pd.Operations, 2)
+	assert.Equal(t, "create_label", pd.Operations[0].Name)
+	assert.True(t, pd.Operations[0].IsWrite)
+	assert.NotEmpty(t, pd.Operations[0].InputSchema)
+	assert.NotEmpty(t, pd.Operations[0].OutputSchema)
 
 	roundTripped, err := ProtoToDescriptor(pd)
 	require.NoError(t, err)
@@ -582,6 +604,46 @@ func TestDescriptorRoundTrip(t *testing.T) {
 	assert.NotNil(t, roundTripped.Schema)
 	assert.NotNil(t, roundTripped.ExtractDependencies)
 	assert.Equal(t, desc.WriteOperations, roundTripped.WriteOperations)
+
+	require.Len(t, roundTripped.Operations, 2)
+	rtOp := roundTripped.Operations[0]
+	assert.Equal(t, "create_label", rtOp.Name)
+	assert.Equal(t, "Create Label", rtOp.DisplayName)
+	assert.Equal(t, "creates a label", rtOp.Description)
+	assert.True(t, rtOp.IsWrite)
+	assert.True(t, rtOp.IsDeprecated)
+	assert.Equal(t, "use create_label_v2", rtOp.DeprecationMessage)
+	assert.Equal(t, []string{"label"}, rtOp.Tags)
+	assert.Equal(t, []provider.Capability{provider.CapabilityTransform}, rtOp.Capabilities)
+	require.NotNil(t, rtOp.InputSchema)
+	assert.Contains(t, rtOp.InputSchema.Properties, "label")
+	require.NotNil(t, rtOp.OutputSchema)
+	assert.Contains(t, rtOp.OutputSchema.Properties, "id")
+	require.Len(t, rtOp.Examples, 1)
+	assert.Equal(t, "ex", rtOp.Examples[0].Name)
+	assert.Equal(t, "list_labels", roundTripped.Operations[1].Name)
+}
+
+func TestProtoToOperations_NilEntriesIgnored(t *testing.T) {
+	// A malformed or malicious plugin response may contain nil entries in the
+	// repeated operation and example fields; conversion must not panic.
+	ops := []*proto.OperationDescriptor{
+		nil,
+		{
+			Name: "create_label",
+			Examples: []*proto.Example{
+				nil,
+				{Name: "ex", Description: "d", Yaml: "yaml: 1"},
+			},
+		},
+	}
+
+	var got []provider.OperationDescriptor
+	require.NotPanics(t, func() { got = protoToOperations(ops) })
+	require.Len(t, got, 1)
+	assert.Equal(t, "create_label", got[0].Name)
+	require.Len(t, got[0].Examples, 1)
+	assert.Equal(t, "ex", got[0].Examples[0].Name)
 }
 
 func TestProtoToDescriptor_InvalidVersion(t *testing.T) {

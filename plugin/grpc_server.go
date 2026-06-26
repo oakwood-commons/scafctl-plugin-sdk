@@ -422,6 +422,7 @@ func descriptorToProto(desc *provider.Descriptor) *proto.ProviderDescriptor {
 		Deprecated: desc.IsDeprecated, Beta: desc.Beta,
 		HasExtractDependencies: desc.ExtractDependencies != nil,
 		WriteOperations:        desc.WriteOperations,
+		Operations:             operationsToProto(desc.Operations),
 	}
 	for i, cap := range desc.Capabilities {
 		pd.Capabilities[i] = string(cap)
@@ -459,6 +460,87 @@ func descriptorToProto(desc *provider.Descriptor) *proto.ProviderDescriptor {
 	return pd
 }
 
+// operationsToProto converts provider OperationDescriptors to their proto form.
+// Schemas are serialized as raw JSON bytes to preserve fidelity.
+func operationsToProto(ops []provider.OperationDescriptor) []*proto.OperationDescriptor {
+	if len(ops) == 0 {
+		return nil
+	}
+	out := make([]*proto.OperationDescriptor, 0, len(ops))
+	for _, op := range ops {
+		po := &proto.OperationDescriptor{
+			Name: op.Name, DisplayName: op.DisplayName, Description: op.Description,
+			IsWrite: op.IsWrite, Tags: op.Tags,
+			Deprecated: op.IsDeprecated, DeprecationMessage: op.DeprecationMessage,
+		}
+		if len(op.Capabilities) > 0 {
+			po.Capabilities = make([]string, len(op.Capabilities))
+			for i, c := range op.Capabilities {
+				po.Capabilities[i] = string(c)
+			}
+		}
+		if op.InputSchema != nil {
+			if raw, err := json.Marshal(op.InputSchema); err == nil {
+				po.InputSchema = raw
+			}
+		}
+		if op.OutputSchema != nil {
+			if raw, err := json.Marshal(op.OutputSchema); err == nil {
+				po.OutputSchema = raw
+			}
+		}
+		for _, ex := range op.Examples {
+			po.Examples = append(po.Examples, &proto.Example{Name: ex.Name, Description: ex.Description, Yaml: ex.YAML})
+		}
+		out = append(out, po)
+	}
+	return out
+}
+
+// protoToOperations converts proto OperationDescriptors back to provider form.
+func protoToOperations(ops []*proto.OperationDescriptor) []provider.OperationDescriptor {
+	if len(ops) == 0 {
+		return nil
+	}
+	out := make([]provider.OperationDescriptor, 0, len(ops))
+	for _, po := range ops {
+		if po == nil {
+			continue
+		}
+		op := provider.OperationDescriptor{
+			Name: po.Name, DisplayName: po.DisplayName, Description: po.Description,
+			IsWrite: po.IsWrite, Tags: po.Tags,
+			IsDeprecated: po.Deprecated, DeprecationMessage: po.DeprecationMessage,
+		}
+		if len(po.Capabilities) > 0 {
+			op.Capabilities = make([]provider.Capability, len(po.Capabilities))
+			for i, c := range po.Capabilities {
+				op.Capabilities[i] = provider.Capability(c)
+			}
+		}
+		if len(po.InputSchema) > 0 {
+			var s jsonschema.Schema
+			if err := json.Unmarshal(po.InputSchema, &s); err == nil {
+				op.InputSchema = &s
+			}
+		}
+		if len(po.OutputSchema) > 0 {
+			var s jsonschema.Schema
+			if err := json.Unmarshal(po.OutputSchema, &s); err == nil {
+				op.OutputSchema = &s
+			}
+		}
+		for _, ex := range po.Examples {
+			if ex == nil {
+				continue
+			}
+			op.Examples = append(op.Examples, provider.Example{Name: ex.Name, Description: ex.Description, YAML: ex.Yaml})
+		}
+		out = append(out, op)
+	}
+	return out
+}
+
 // ProtoToDescriptor converts proto.ProviderDescriptor to provider.Descriptor.
 func ProtoToDescriptor(pd *proto.ProviderDescriptor) (*provider.Descriptor, error) {
 	var version *semver.Version
@@ -476,6 +558,7 @@ func ProtoToDescriptor(pd *proto.ProviderDescriptor) (*provider.Descriptor, erro
 		SensitiveFields: pd.SensitiveFields, Tags: pd.Tags, Icon: pd.Icon,
 		IsDeprecated: pd.Deprecated, Beta: pd.Beta,
 		WriteOperations: pd.WriteOperations,
+		Operations:      protoToOperations(pd.Operations),
 	}
 	for i, cap := range pd.Capabilities {
 		desc.Capabilities[i] = provider.Capability(cap)

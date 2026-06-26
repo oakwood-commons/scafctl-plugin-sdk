@@ -66,6 +66,20 @@ func TestIntegration_ProviderRoundTrip(t *testing.T) {
 				Category: "utility", Tags: []string{"test", "echo"},
 				Capabilities:    []provider.Capability{provider.CapabilityTransform},
 				SensitiveFields: []string{"secret"},
+				WriteOperations: []string{"write_message"},
+				Operations: []provider.OperationDescriptor{
+					{
+						Name: "write_message", DisplayName: "Write Message",
+						Description: "writes a message", IsWrite: true,
+						Capabilities: []provider.Capability{provider.CapabilityTransform},
+						Tags:         []string{"mutating"},
+						InputSchema: &jsonschema.Schema{
+							Type:       "object",
+							Properties: map[string]*jsonschema.Schema{"message": {Type: "string"}},
+						},
+					},
+					{Name: "read_message", Description: "reads a message"},
+				},
 				Schema: schemahelper.ObjectSchema(
 					[]string{"message"},
 					map[string]*jsonschema.Schema{
@@ -146,6 +160,25 @@ func TestIntegration_ProviderRoundTrip(t *testing.T) {
 		require.NotNil(t, d.Schema)
 		require.Contains(t, d.Schema.Parameters, "message")
 		assert.True(t, d.Schema.Parameters["message"].Required)
+
+		assert.Equal(t, []string{"write_message"}, d.WriteOperations)
+		require.Len(t, d.Operations, 2)
+		assert.Equal(t, "write_message", d.Operations[0].Name)
+		assert.True(t, d.Operations[0].IsWrite)
+		assert.NotEmpty(t, d.Operations[0].InputSchema)
+		assert.Equal(t, "read_message", d.Operations[1].Name)
+
+		// Verify the operations survive the full proto -> provider round-trip
+		// over the live gRPC path.
+		rt, err := plugin.ProtoToDescriptor(d)
+		require.NoError(t, err)
+		require.Len(t, rt.Operations, 2)
+		assert.Equal(t, "write_message", rt.Operations[0].Name)
+		assert.True(t, rt.Operations[0].IsWrite)
+		assert.True(t, rt.IsWriteOperation("write_message"))
+		assert.Equal(t, []provider.Capability{provider.CapabilityTransform}, rt.Operations[0].Capabilities)
+		require.NotNil(t, rt.Operations[0].InputSchema)
+		assert.Contains(t, rt.Operations[0].InputSchema.Properties, "message")
 	})
 
 	t.Run("GetProviderDescriptor_UnknownProvider", func(t *testing.T) {

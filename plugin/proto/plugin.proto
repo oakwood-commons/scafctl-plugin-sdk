@@ -141,6 +141,24 @@ message ProviderDescriptor {
   map<string, bytes> raw_output_schemas = 20;
   bool has_extract_dependencies = 21;
   repeated string write_operations = 22;
+  repeated OperationDescriptor operations = 23;
+}
+
+// OperationDescriptor carries rich, per-operation metadata for providers that
+// expose many named operations. Schemas are transported as raw JSON Schema
+// bytes to preserve fidelity.
+message OperationDescriptor {
+  string name = 1;
+  string display_name = 2;
+  string description = 3;
+  repeated string capabilities = 4;
+  bool is_write = 5;
+  bytes input_schema = 6;
+  bytes output_schema = 7;
+  repeated Example examples = 8;
+  repeated string tags = 9;
+  bool deprecated = 10;
+  string deprecation_message = 11;
 }
 
 message Link {
