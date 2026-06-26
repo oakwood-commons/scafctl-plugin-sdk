@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -104,4 +105,66 @@ func BenchmarkHasCapability(b *testing.B) {
 			_ = HasCapability(caps, "nonexistent")
 		}
 	})
+}
+
+func BenchmarkHandlerMetadata_Marshal(b *testing.B) {
+	md := HandlerMetadata{
+		Claims:        &Claims{Subject: "user@example.com", Email: "user@example.com"},
+		ExpiresAt:     time.Now().Add(time.Hour),
+		Scopes:        []string{"openid", "profile"},
+		LastLoginFlow: FlowDeviceCode,
+		SessionID:     "session-123",
+		LastRefresh:   time.Now(),
+		ClientID:      "client-789",
+		Metadata:      map[string]any{"tenantId": "tenant-abc"},
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_, _ = json.Marshal(md)
+	}
+}
+
+func BenchmarkHandlerMetadata_Unmarshal(b *testing.B) {
+	md := HandlerMetadata{
+		Claims:        &Claims{Subject: "user@example.com", Email: "user@example.com"},
+		ExpiresAt:     time.Now().Add(time.Hour),
+		Scopes:        []string{"openid", "profile"},
+		LastLoginFlow: FlowDeviceCode,
+		SessionID:     "session-123",
+		LastRefresh:   time.Now(),
+		ClientID:      "client-789",
+		Metadata:      map[string]any{"tenantId": "tenant-abc"},
+	}
+	data, err := json.Marshal(md)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		var out HandlerMetadata
+		_ = json.Unmarshal(data, &out)
+	}
+}
+
+func BenchmarkHandlerMetadata_MetaString(b *testing.B) {
+	md := HandlerMetadata{Metadata: map[string]any{"tenantId": "tenant-abc", "project": "my-project"}}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_ = md.MetaString("tenantId")
+	}
+}
+
+func BenchmarkHandlerMetadata_SetMeta(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		var md HandlerMetadata
+		md.SetMeta("tenantId", "tenant-abc")
+	}
 }
