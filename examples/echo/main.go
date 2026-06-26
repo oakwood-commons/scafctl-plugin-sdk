@@ -36,6 +36,26 @@ func (p *EchoPlugin) GetProviderDescriptor(_ context.Context, providerName strin
 		Version:      semver.MustParse("1.0.0"),
 		Category:     "utility",
 		Capabilities: []provider.Capability{provider.CapabilityTransform},
+		Operations: []provider.OperationDescriptor{
+			{
+				Name:         "echo",
+				DisplayName:  "Echo",
+				Description:  "Returns the input message, optionally uppercased",
+				Capabilities: []provider.Capability{provider.CapabilityTransform},
+				Tags:         []string{"utility", "demo"},
+				InputSchema: schemahelper.ObjectSchema(
+					[]string{"message"},
+					map[string]*jsonschema.Schema{
+						"message":   schemahelper.StringProp("The message to echo"),
+						"uppercase": schemahelper.BoolProp("Whether to convert the message to uppercase"),
+					},
+				),
+				OutputSchema: &jsonschema.Schema{
+					Type:       "object",
+					Properties: map[string]*jsonschema.Schema{"echoed": schemahelper.StringProp("The echoed message")},
+				},
+			},
+		},
 		Schema: schemahelper.ObjectSchema(
 			[]string{"message"},
 			map[string]*jsonschema.Schema{

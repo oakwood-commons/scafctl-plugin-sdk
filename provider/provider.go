@@ -62,6 +62,7 @@ type Descriptor struct {
 	//   - authentication: must include "authenticated" (boolean) and "token" (string)
 	//   - action: must include "success" (boolean)
 	//   - state: must include "success" (boolean)
+	//   - kubeconfig: must include "success" (boolean)
 	//   - from: no required fields
 	//   - transform: no required fields
 	OutputSchemas map[Capability]*jsonschema.Schema `json:"outputSchemas" yaml:"outputSchemas" doc:"Output schemas per capability (JSON Schema)" required:"true"`
@@ -105,7 +106,21 @@ type Descriptor struct {
 	//     determines read vs write behavior.
 	//   - empty ([]string{}): all operations are reads (everything allowed in resolvers).
 	//   - populated: listed operations are blocked in resolver context.
+	//
+	// Superseded by Operations: prefer declaring rich OperationDescriptor entries
+	// with IsWrite set. WriteOperations is retained for backward compatibility and
+	// may be removed in a future major version. Use EffectiveWriteOperations to
+	// read the effective write set regardless of which field is populated.
 	WriteOperations []string `json:"writeOperations" yaml:"writeOperations" doc:"Operation names that mutate state" maxItems:"200"`
+
+	// Operations declares rich, per-operation metadata (descriptions, capabilities,
+	// schemas, deprecation info) for providers that expose many named operations.
+	// It is additive and optional: providers may continue to use WriteOperations
+	// alone. When both are set they must be consistent (see ValidateDescriptor).
+	// Operation-level Capabilities must be a subset of the provider's Capabilities.
+	// Per-operation schemas are documentation/discovery metadata only; the
+	// provider-level Schema remains the source of truth for runtime validation.
+	Operations []OperationDescriptor `json:"operations,omitempty" yaml:"operations,omitempty" doc:"Per-operation metadata" maxItems:"500"`
 
 	// Category classifies the provider for organization in catalogs and documentation.
 	// Examples: "network", "storage", "security", "utility".
@@ -178,14 +193,70 @@ func (d *Descriptor) IsSensitiveField(name string) bool {
 }
 
 // IsWriteOperation reports whether the named operation is listed in WriteOperations.
-// Returns false when WriteOperations is nil (provider cannot classify operations).
+// When WriteOperations is nil (provider cannot classify operations via the legacy
+// field), it falls back to Operations, returning true if a matching operation has
+// IsWrite set. Returns false when neither field classifies the operation.
 func (d *Descriptor) IsWriteOperation(name string) bool {
 	for _, op := range d.WriteOperations {
 		if op == name {
 			return true
 		}
 	}
+	if d.WriteOperations == nil {
+		if op := d.GetOperation(name); op != nil {
+			return op.IsWrite
+		}
+	}
 	return false
+}
+
+// EffectiveWriteOperations returns the names of operations that mutate external
+// state. It returns a copy of WriteOperations when that field is non-nil
+// (including an empty slice, which means "all operations are reads"). Otherwise
+// it derives the list from Operations: a non-nil slice of the IsWrite operation
+// names, or a non-nil empty slice when Operations is populated but classifies
+// every operation as a read. Returns nil only when neither field is populated,
+// preserving the documented nil ("cannot classify") versus empty ("all reads")
+// distinction. The returned slice never aliases the descriptor's backing
+// arrays, so callers may safely retain or mutate it.
+func (d *Descriptor) EffectiveWriteOperations() []string {
+	if d.WriteOperations != nil {
+		out := make([]string, len(d.WriteOperations))
+		copy(out, d.WriteOperations)
+		return out
+	}
+	if len(d.Operations) == 0 {
+		return nil
+	}
+	writes := make([]string, 0, len(d.Operations))
+	for _, op := range d.Operations {
+		if op.IsWrite {
+			writes = append(writes, op.Name)
+		}
+	}
+	return writes
+}
+
+// GetOperation returns the operation with the given name, or nil if not found.
+func (d *Descriptor) GetOperation(name string) *OperationDescriptor {
+	for i := range d.Operations {
+		if d.Operations[i].Name == name {
+			return &d.Operations[i]
+		}
+	}
+	return nil
+}
+
+// OperationNames returns the names of all declared operations in declaration order.
+func (d *Descriptor) OperationNames() []string {
+	if len(d.Operations) == 0 {
+		return nil
+	}
+	names := make([]string, len(d.Operations))
+	for i, op := range d.Operations {
+		names[i] = op.Name
+	}
+	return names
 }
 
 // Capability represents the types of operations a provider can perform.
@@ -198,12 +269,15 @@ const (
 	CapabilityAuthentication Capability = "authentication"
 	CapabilityAction         Capability = "action"
 	CapabilityState          Capability = "state"
+	CapabilityKubeconfig     Capability = "kubeconfig"
 )
 
 // IsValid checks if the capability is valid.
 func (c Capability) IsValid() bool {
 	switch c {
-	case CapabilityFrom, CapabilityTransform, CapabilityValidation, CapabilityAuthentication, CapabilityAction, CapabilityState:
+	case CapabilityFrom, CapabilityTransform, CapabilityValidation,
+		CapabilityAuthentication, CapabilityAction, CapabilityState,
+		CapabilityKubeconfig:
 		return true
 	default:
 		return false
@@ -213,6 +287,52 @@ func (c Capability) IsValid() bool {
 // String returns the string representation.
 func (c Capability) String() string {
 	return string(c)
+}
+
+// OperationDescriptor describes a single named operation a provider exposes.
+// It enriches the bare WriteOperations list with discovery metadata such as
+// descriptions, per-operation capabilities, schemas, and deprecation info.
+//
+// Per-operation schemas are documentation/discovery metadata only and should
+// contain operation-specific fields (excluding shared inputs like operation,
+// owner, or repo). The provider-level Schema remains the source of truth for
+// runtime input validation.
+type OperationDescriptor struct {
+	// Name is the unique operation identifier (e.g., "create_issue").
+	Name string `json:"name" yaml:"name" doc:"Operation identifier" minLength:"1" maxLength:"100" required:"true"`
+
+	// DisplayName is the human-readable operation name shown in UIs.
+	DisplayName string `json:"displayName,omitempty" yaml:"displayName,omitempty" doc:"Human-readable operation name" maxLength:"100"`
+
+	// Description explains what the operation does.
+	Description string `json:"description,omitempty" yaml:"description,omitempty" doc:"Operation description" maxLength:"500"`
+
+	// Capabilities lists the capabilities this operation supports.
+	// Must be a subset of the provider's declared Capabilities.
+	Capabilities []Capability `json:"capabilities,omitempty" yaml:"capabilities,omitempty" doc:"Operation capabilities (subset of provider capabilities)" maxItems:"10"`
+
+	// IsWrite indicates the operation mutates external state.
+	// Used to derive EffectiveWriteOperations when WriteOperations is unset.
+	IsWrite bool `json:"isWrite,omitempty" yaml:"isWrite,omitempty" doc:"Whether the operation mutates external state"`
+
+	// InputSchema documents operation-specific input fields (JSON Schema).
+	// Documentation only; not used for runtime validation.
+	InputSchema *jsonschema.Schema `json:"inputSchema,omitempty" yaml:"inputSchema,omitempty" doc:"Operation-specific input fields (JSON Schema)"`
+
+	// OutputSchema documents the operation's output structure (JSON Schema).
+	OutputSchema *jsonschema.Schema `json:"outputSchema,omitempty" yaml:"outputSchema,omitempty" doc:"Operation output (JSON Schema)"`
+
+	// Examples contains sample usages for this operation.
+	Examples []Example `json:"examples,omitempty" yaml:"examples,omitempty" doc:"Usage examples" maxItems:"10"`
+
+	// Tags are searchable keywords for discovery and filtering.
+	Tags []string `json:"tags,omitempty" yaml:"tags,omitempty" doc:"Searchable keywords" maxItems:"20"`
+
+	// IsDeprecated indicates the operation should no longer be used.
+	IsDeprecated bool `json:"deprecated,omitempty" yaml:"deprecated,omitempty" doc:"Deprecation status"`
+
+	// DeprecationMessage provides guidance when the operation is deprecated.
+	DeprecationMessage string `json:"deprecationMessage,omitempty" yaml:"deprecationMessage,omitempty" doc:"Deprecation guidance" maxLength:"300"`
 }
 
 // Contact represents maintainer contact information.
@@ -248,7 +368,7 @@ func getCapabilityRequiredFields(capability Capability) map[string]string {
 			"authenticated": "boolean",
 			"token":         "string",
 		}
-	case CapabilityAction, CapabilityState:
+	case CapabilityAction, CapabilityState, CapabilityKubeconfig:
 		return map[string]string{
 			"success": "boolean",
 		}
@@ -325,11 +445,86 @@ func ValidateDescriptor(desc *Descriptor) error {
 		seen[op] = struct{}{}
 	}
 
+	errs = append(errs, validateOperations(desc)...)
+
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
 
 	return nil
+}
+
+// validateOperations checks the optional Operations field for structural and
+// consistency problems:
+//   - each operation must have a non-empty Name
+//   - operation names must be unique
+//   - operation capabilities must be valid and a subset of provider capabilities
+//   - when both WriteOperations and Operations are set, every operation marked
+//     IsWrite must also be listed in WriteOperations (so the legacy enforcement
+//     field does not under-report writes), and every WriteOperations entry that
+//     has a matching OperationDescriptor must be marked IsWrite (so discovery
+//     metadata does not contradict the legacy enforcement list)
+func validateOperations(desc *Descriptor) []error {
+	if len(desc.Operations) == 0 {
+		return nil
+	}
+
+	providerCaps := make(map[Capability]struct{}, len(desc.Capabilities))
+	for _, c := range desc.Capabilities {
+		providerCaps[c] = struct{}{}
+	}
+
+	var writeSet map[string]struct{}
+	if desc.WriteOperations != nil {
+		writeSet = make(map[string]struct{}, len(desc.WriteOperations))
+		for _, op := range desc.WriteOperations {
+			writeSet[op] = struct{}{}
+		}
+	}
+
+	var errs []error
+	seen := make(map[string]struct{}, len(desc.Operations))
+	opIsWrite := make(map[string]bool, len(desc.Operations))
+	for _, op := range desc.Operations {
+		if op.Name == "" {
+			errs = append(errs, errors.New("operations must not contain entries with empty names"))
+			continue
+		}
+		if _, dup := seen[op.Name]; dup {
+			errs = append(errs, fmt.Errorf("operations contains duplicate entry %q", op.Name))
+		}
+		seen[op.Name] = struct{}{}
+		opIsWrite[op.Name] = op.IsWrite
+
+		for _, c := range op.Capabilities {
+			if !c.IsValid() {
+				errs = append(errs, fmt.Errorf("operation %q declares unknown capability %q", op.Name, c))
+				continue
+			}
+			if _, ok := providerCaps[c]; !ok {
+				errs = append(errs, fmt.Errorf("operation %q declares capability %q not supported by the provider", op.Name, c))
+			}
+		}
+
+		if writeSet != nil && op.IsWrite {
+			if _, ok := writeSet[op.Name]; !ok {
+				errs = append(errs, fmt.Errorf("operation %q is marked IsWrite but is missing from WriteOperations", op.Name))
+			}
+		}
+	}
+
+	// Reverse direction: a WriteOperations entry that has a matching operation
+	// must be marked IsWrite, otherwise discovery metadata contradicts the
+	// legacy enforcement list. Iterate the slice for deterministic ordering.
+	if writeSet != nil {
+		for _, name := range desc.WriteOperations {
+			if isWrite, ok := opIsWrite[name]; ok && !isWrite {
+				errs = append(errs, fmt.Errorf("operation %q is listed in WriteOperations but its descriptor is not marked IsWrite", name))
+			}
+		}
+	}
+
+	return errs
 }
 
 // DefaultOutputSchemas returns a minimal valid output schema map for the given

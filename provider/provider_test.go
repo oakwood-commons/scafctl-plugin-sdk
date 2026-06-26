@@ -26,6 +26,7 @@ func TestCapability_IsValid(t *testing.T) {
 		{name: "authentication", cap: CapabilityAuthentication, expected: true},
 		{name: "action", cap: CapabilityAction, expected: true},
 		{name: "state", cap: CapabilityState, expected: true},
+		{name: "kubeconfig", cap: CapabilityKubeconfig, expected: true},
 		{name: "invalid", cap: Capability("invalid"), expected: false},
 		{name: "empty", cap: Capability(""), expected: false},
 	}
@@ -280,6 +281,24 @@ func TestValidateDescriptor(t *testing.T) {
 		require.NoError(t, ValidateDescriptor(d))
 	})
 
+	t.Run("kubeconfig requires success", func(t *testing.T) {
+		d := validDescriptor()
+		d.Capabilities = []Capability{CapabilityKubeconfig}
+		d.OutputSchemas = map[Capability]*jsonschema.Schema{
+			CapabilityKubeconfig: {Type: "object", Properties: map[string]*jsonschema.Schema{}},
+		}
+		err := ValidateDescriptor(d)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires output field")
+	})
+
+	t.Run("kubeconfig with correct fields", func(t *testing.T) {
+		d := validDescriptor()
+		d.Capabilities = []Capability{CapabilityKubeconfig}
+		d.OutputSchemas = DefaultOutputSchemas(CapabilityKubeconfig)
+		require.NoError(t, ValidateDescriptor(d))
+	})
+
 	t.Run("write operations nil is valid", func(t *testing.T) {
 		d := validDescriptor()
 		d.WriteOperations = nil
@@ -353,6 +372,172 @@ func TestDescriptor_IsWriteOperation(t *testing.T) {
 			assert.Equal(t, tt.expected, d.IsWriteOperation(tt.operation))
 		})
 	}
+}
+
+func TestDescriptor_IsWriteOperation_OperationsFallback(t *testing.T) {
+	ops := []OperationDescriptor{
+		{Name: "create_issue", IsWrite: true},
+		{Name: "get_issue", IsWrite: false},
+	}
+
+	t.Run("falls back to Operations when WriteOperations is nil", func(t *testing.T) {
+		d := &Descriptor{Operations: ops}
+		assert.True(t, d.IsWriteOperation("create_issue"))
+		assert.False(t, d.IsWriteOperation("get_issue"))
+		assert.False(t, d.IsWriteOperation("unknown"))
+	})
+
+	t.Run("WriteOperations takes precedence over Operations", func(t *testing.T) {
+		d := &Descriptor{WriteOperations: []string{}, Operations: ops}
+		// Empty (non-nil) WriteOperations means no enforcement; no fallback.
+		assert.False(t, d.IsWriteOperation("create_issue"))
+	})
+}
+
+func TestDescriptor_EffectiveWriteOperations(t *testing.T) {
+	t.Run("returns WriteOperations when set", func(t *testing.T) {
+		d := &Descriptor{WriteOperations: []string{"a", "b"}}
+		assert.Equal(t, []string{"a", "b"}, d.EffectiveWriteOperations())
+	})
+
+	t.Run("returned slice does not alias WriteOperations", func(t *testing.T) {
+		d := &Descriptor{WriteOperations: []string{"a", "b"}}
+		got := d.EffectiveWriteOperations()
+		got[0] = "mutated"
+		assert.Equal(t, []string{"a", "b"}, d.WriteOperations, "descriptor must not be mutated by caller")
+	})
+
+	t.Run("empty non-nil WriteOperations returned as-is", func(t *testing.T) {
+		d := &Descriptor{WriteOperations: []string{}}
+		assert.Equal(t, []string{}, d.EffectiveWriteOperations())
+	})
+
+	t.Run("derives from Operations when WriteOperations is nil", func(t *testing.T) {
+		d := &Descriptor{Operations: []OperationDescriptor{
+			{Name: "create", IsWrite: true},
+			{Name: "read", IsWrite: false},
+			{Name: "delete", IsWrite: true},
+		}}
+		assert.Equal(t, []string{"create", "delete"}, d.EffectiveWriteOperations())
+	})
+
+	t.Run("nil when neither populated", func(t *testing.T) {
+		d := &Descriptor{}
+		assert.Nil(t, d.EffectiveWriteOperations())
+	})
+
+	t.Run("empty non-nil slice when Operations classifies all as reads", func(t *testing.T) {
+		d := &Descriptor{Operations: []OperationDescriptor{{Name: "read", IsWrite: false}}}
+		got := d.EffectiveWriteOperations()
+		assert.NotNil(t, got, "classified read-only operations must yield empty, not nil")
+		assert.Empty(t, got)
+	})
+}
+
+func TestDescriptor_GetOperation(t *testing.T) {
+	d := &Descriptor{Operations: []OperationDescriptor{
+		{Name: "create", Description: "creates"},
+		{Name: "delete", Description: "deletes"},
+	}}
+
+	op := d.GetOperation("delete")
+	require.NotNil(t, op)
+	assert.Equal(t, "deletes", op.Description)
+
+	assert.Nil(t, d.GetOperation("missing"))
+	assert.Nil(t, (&Descriptor{}).GetOperation("create"))
+}
+
+func TestDescriptor_OperationNames(t *testing.T) {
+	d := &Descriptor{Operations: []OperationDescriptor{
+		{Name: "create"},
+		{Name: "delete"},
+	}}
+	assert.Equal(t, []string{"create", "delete"}, d.OperationNames())
+	assert.Nil(t, (&Descriptor{}).OperationNames())
+}
+
+func TestValidateDescriptor_Operations(t *testing.T) {
+	t.Run("valid operations pass", func(t *testing.T) {
+		d := validDescriptor()
+		d.Capabilities = []Capability{CapabilityTransform, CapabilityAction}
+		d.OutputSchemas = map[Capability]*jsonschema.Schema{
+			CapabilityTransform: {Type: "object"},
+			CapabilityAction:    {Type: "object", Properties: map[string]*jsonschema.Schema{"success": {Type: "boolean"}}},
+		}
+		d.WriteOperations = []string{"create"}
+		d.Operations = []OperationDescriptor{
+			{Name: "create", IsWrite: true, Capabilities: []Capability{CapabilityAction}},
+			{Name: "read", Capabilities: []Capability{CapabilityTransform}},
+		}
+		require.NoError(t, ValidateDescriptor(d))
+	})
+
+	t.Run("empty operation name rejected", func(t *testing.T) {
+		d := validDescriptor()
+		d.Operations = []OperationDescriptor{{Name: ""}}
+		err := ValidateDescriptor(d)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "empty names")
+	})
+
+	t.Run("duplicate operation name rejected", func(t *testing.T) {
+		d := validDescriptor()
+		d.Operations = []OperationDescriptor{{Name: "create"}, {Name: "create"}}
+		err := ValidateDescriptor(d)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `duplicate entry "create"`)
+	})
+
+	t.Run("unknown operation capability rejected", func(t *testing.T) {
+		d := validDescriptor()
+		d.Operations = []OperationDescriptor{{Name: "create", Capabilities: []Capability{"bogus"}}}
+		err := ValidateDescriptor(d)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown capability")
+	})
+
+	t.Run("operation capability not in provider rejected", func(t *testing.T) {
+		d := validDescriptor()
+		// validDescriptor declares only transform; action is not supported.
+		d.Operations = []OperationDescriptor{{Name: "create", Capabilities: []Capability{CapabilityAction}}}
+		err := ValidateDescriptor(d)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not supported by the provider")
+	})
+
+	t.Run("IsWrite op missing from WriteOperations rejected", func(t *testing.T) {
+		d := validDescriptor()
+		d.WriteOperations = []string{"other"}
+		d.Operations = []OperationDescriptor{{Name: "create", IsWrite: true}}
+		err := ValidateDescriptor(d)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing from WriteOperations")
+	})
+
+	t.Run("IsWrite op consistent when WriteOperations nil", func(t *testing.T) {
+		d := validDescriptor()
+		d.WriteOperations = nil
+		d.Operations = []OperationDescriptor{{Name: "create", IsWrite: true}}
+		require.NoError(t, ValidateDescriptor(d))
+	})
+
+	t.Run("WriteOperations entry not marked IsWrite rejected", func(t *testing.T) {
+		d := validDescriptor()
+		d.WriteOperations = []string{"delete"}
+		d.Operations = []OperationDescriptor{{Name: "delete", IsWrite: false}}
+		err := ValidateDescriptor(d)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "listed in WriteOperations but its descriptor is not marked IsWrite")
+	})
+
+	t.Run("WriteOperations entry without matching operation is allowed", func(t *testing.T) {
+		d := validDescriptor()
+		// "delete" has no OperationDescriptor, so no contradiction to enforce.
+		d.WriteOperations = []string{"delete"}
+		d.Operations = []OperationDescriptor{{Name: "read", IsWrite: false}}
+		require.NoError(t, ValidateDescriptor(d))
+	})
 }
 
 func TestDefaultOutputSchemas(t *testing.T) {
