@@ -1,7 +1,9 @@
 // Copyright 2025-2026 Oakwood Commons
 // SPDX-License-Identifier: Apache-2.0
 
-// Package auth provides authentication handler types and utilities for scafctl plugins.
+// Package auth provides authentication handler types and utilities for scafctl
+// plugins, including the canonical HandlerMetadata schema shared by core and all
+// plugin auth handlers.
 package auth
 
 import (
