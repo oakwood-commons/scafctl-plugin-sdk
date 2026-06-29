@@ -2143,8 +2143,11 @@ type LoginRequest struct {
 	Flow           string                 `protobuf:"bytes,4,opt,name=flow,proto3" json:"flow,omitempty"`
 	TimeoutSeconds int64                  `protobuf:"varint,5,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
 	Profile        string                 `protobuf:"bytes,6,opt,name=profile,proto3" json:"profile,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// hostname selects a specific instance (e.g. a cluster or server) for
+	// handlers that advertise the hostname capability.
+	Hostname      string `protobuf:"bytes,7,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LoginRequest) Reset() {
@@ -2215,6 +2218,13 @@ func (x *LoginRequest) GetTimeoutSeconds() int64 {
 func (x *LoginRequest) GetProfile() string {
 	if x != nil {
 		return x.Profile
+	}
+	return ""
+}
+
+func (x *LoginRequest) GetHostname() string {
+	if x != nil {
+		return x.Hostname
 	}
 	return ""
 }
@@ -4719,14 +4729,15 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\x14\n" +
 	"\x05flows\x18\x03 \x03(\tR\x05flows\x12\"\n" +
-	"\fcapabilities\x18\x04 \x03(\tR\fcapabilities\"\xbd\x01\n" +
+	"\fcapabilities\x18\x04 \x03(\tR\fcapabilities\"\xd9\x01\n" +
 	"\fLoginRequest\x12!\n" +
 	"\fhandler_name\x18\x01 \x01(\tR\vhandlerName\x12\x1b\n" +
 	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x16\n" +
 	"\x06scopes\x18\x03 \x03(\tR\x06scopes\x12\x12\n" +
 	"\x04flow\x18\x04 \x01(\tR\x04flow\x12'\n" +
 	"\x0ftimeout_seconds\x18\x05 \x01(\x03R\x0etimeoutSeconds\x12\x18\n" +
-	"\aprofile\x18\x06 \x01(\tR\aprofile\"\xb0\x01\n" +
+	"\aprofile\x18\x06 \x01(\tR\aprofile\x12\x1a\n" +
+	"\bhostname\x18\a \x01(\tR\bhostname\"\xb0\x01\n" +
 	"\x12LoginStreamMessage\x12H\n" +
 	"\x12device_code_prompt\x18\x01 \x01(\v2\x18.plugin.DeviceCodePromptH\x00R\x10deviceCodePrompt\x12-\n" +
 	"\x06result\x18\x02 \x01(\v2\x13.plugin.LoginResultH\x00R\x06result\x12\x16\n" +

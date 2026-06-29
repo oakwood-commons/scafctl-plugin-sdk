@@ -333,6 +333,9 @@ message LoginRequest {
   string flow = 4;
   int64 timeout_seconds = 5;
   string profile = 6;
+  // hostname selects a specific instance (e.g. a cluster or server) for
+  // handlers that advertise the hostname capability.
+  string hostname = 7;
 }
 
 message LoginStreamMessage {

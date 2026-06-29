@@ -81,6 +81,7 @@ func (s *AuthHandlerGRPCServer) Login(req *proto.LoginRequest, stream grpc.Serve
 	loginReq := LoginRequest{
 		TenantID: req.TenantId, Scopes: req.Scopes,
 		Flow: auth.Flow(req.Flow), Timeout: time.Duration(req.TimeoutSeconds) * time.Second,
+		Hostname: req.Hostname,
 	}
 	result, err := s.Impl.Login(ctx, req.HandlerName, loginReq, deviceCodeCb)
 	if err != nil {

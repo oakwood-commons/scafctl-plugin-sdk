@@ -65,6 +65,9 @@ type LoginRequest struct {
 	Scopes   []string      `json:"scopes,omitempty" yaml:"scopes,omitempty"`
 	Flow     auth.Flow     `json:"flow,omitempty" yaml:"flow,omitempty"`
 	Timeout  time.Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	// Hostname selects a specific instance (e.g. a cluster or server) for
+	// handlers that advertise auth.CapHostname.
+	Hostname string `json:"hostname,omitempty" yaml:"hostname,omitempty"`
 }
 
 // LoginResponse contains the result of a plugin Login call.

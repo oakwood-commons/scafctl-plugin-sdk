@@ -31,10 +31,13 @@ const DefaultMinValidFor = 60 * time.Second
 
 // LoginOptions configures the login process.
 type LoginOptions struct {
-	TenantID           string                                          `json:"tenantId,omitempty" yaml:"tenantId,omitempty"`
-	Scopes             []string                                        `json:"scopes,omitempty" yaml:"scopes,omitempty"`
-	Flow               Flow                                            `json:"flow,omitempty" yaml:"flow,omitempty"`
-	Timeout            time.Duration                                   `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	TenantID string        `json:"tenantId,omitempty" yaml:"tenantId,omitempty"`
+	Scopes   []string      `json:"scopes,omitempty" yaml:"scopes,omitempty"`
+	Flow     Flow          `json:"flow,omitempty" yaml:"flow,omitempty"`
+	Timeout  time.Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	// Hostname selects a specific instance (e.g. a cluster or server) for
+	// handlers that advertise CapHostname.
+	Hostname           string                                          `json:"hostname,omitempty" yaml:"hostname,omitempty"`
 	CallbackPort       int                                             `json:"callbackPort,omitempty" yaml:"callbackPort,omitempty"`
 	DeviceCodeCallback func(userCode, verificationURI, message string) `json:"-" yaml:"-"`
 }
