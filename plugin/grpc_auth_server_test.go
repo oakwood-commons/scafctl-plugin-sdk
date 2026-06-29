@@ -169,6 +169,31 @@ func TestAuthGRPCServer_Login_Success(t *testing.T) {
 	assert.NotNil(t, stream.messages[1].GetResult())
 }
 
+func TestAuthGRPCServer_Login_MapsRequestFields(t *testing.T) {
+	var captured LoginRequest
+	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
+		login: func(_ context.Context, _ string, req LoginRequest, _ func(DeviceCodePrompt)) (*LoginResponse, error) {
+			captured = req
+			return &LoginResponse{Claims: &auth.Claims{Email: "user@ex.com"}}, nil
+		},
+	}}
+	stream := &mockLoginStream{ctx: context.Background()}
+	err := srv.Login(&proto.LoginRequest{
+		HandlerName:    "gh",
+		TenantId:       "tenant-1",
+		Scopes:         []string{"repo"},
+		Flow:           "device_code",
+		TimeoutSeconds: 60,
+		Hostname:       "pd1020",
+	}, stream)
+	require.NoError(t, err)
+	assert.Equal(t, "pd1020", captured.Hostname)
+	assert.Equal(t, "tenant-1", captured.TenantID)
+	assert.Equal(t, []string{"repo"}, captured.Scopes)
+	assert.Equal(t, auth.FlowDeviceCode, captured.Flow)
+	assert.Equal(t, 60*time.Second, captured.Timeout)
+}
+
 func TestAuthGRPCServer_Login_Error(t *testing.T) {
 	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
 		login: func(_ context.Context, _ string, _ LoginRequest, _ func(DeviceCodePrompt)) (*LoginResponse, error) {

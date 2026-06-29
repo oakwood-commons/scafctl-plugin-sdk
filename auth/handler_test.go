@@ -4,10 +4,12 @@
 package auth
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFlowConstants(t *testing.T) {
@@ -24,6 +26,26 @@ func TestFlowConstants(t *testing.T) {
 
 func TestDefaultMinValidFor(t *testing.T) {
 	assert.Equal(t, 60*time.Second, DefaultMinValidFor)
+}
+
+func TestLoginOptions_HostnameRoundTrip(t *testing.T) {
+	opts := LoginOptions{
+		TenantID: "tenant-1",
+		Scopes:   []string{"repo"},
+		Flow:     FlowDeviceCode,
+		Hostname: "pd1020",
+	}
+	data, err := json.Marshal(opts)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"hostname":"pd1020"`)
+
+	var decoded LoginOptions
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	assert.Equal(t, "pd1020", decoded.Hostname)
+
+	empty, err := json.Marshal(LoginOptions{})
+	require.NoError(t, err)
+	assert.NotContains(t, string(empty), "hostname")
 }
 
 func TestToken_IsValidFor(t *testing.T) {

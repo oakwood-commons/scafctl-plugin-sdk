@@ -403,6 +403,7 @@ type mockAuthPlugin struct {
 	configuredCfgs   []plugin.ProviderConfig
 	loginResult      *plugin.LoginResponse
 	loginErr         error
+	capturedLoginReq plugin.LoginRequest
 	statusResult     *auth.Status
 	tokenResult      *plugin.TokenResponse
 	cachedTokens     []*auth.CachedTokenInfo
@@ -422,7 +423,8 @@ func (m *mockAuthPlugin) ConfigureAuthHandler(_ context.Context, name string, cf
 	return nil
 }
 
-func (m *mockAuthPlugin) Login(_ context.Context, _ string, _ plugin.LoginRequest, cb func(plugin.DeviceCodePrompt)) (*plugin.LoginResponse, error) {
+func (m *mockAuthPlugin) Login(_ context.Context, _ string, req plugin.LoginRequest, cb func(plugin.DeviceCodePrompt)) (*plugin.LoginResponse, error) {
+	m.capturedLoginReq = req
 	if m.loginErr != nil {
 		return nil, m.loginErr
 	}
@@ -581,6 +583,7 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 			Scopes:         []string{"repo", "user"},
 			TenantId:       "tenant-1",
 			TimeoutSeconds: 300,
+			Hostname:       "pd1020",
 		})
 		require.NoError(t, err)
 
@@ -605,6 +608,9 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 		require.NotNil(t, result)
 		assert.Equal(t, "user123", result.Claims.Subject)
 		assert.Equal(t, "Test User", result.Claims.Name)
+
+		assert.Equal(t, "pd1020", mock.capturedLoginReq.Hostname)
+		assert.Equal(t, "tenant-1", mock.capturedLoginReq.TenantID)
 	})
 
 	t.Run("Login_Error", func(t *testing.T) {
