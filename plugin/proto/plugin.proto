@@ -101,6 +101,17 @@ service AuthHandlerService {
   // DetectAvailableFlows reports which auth flows have pre-existing environment
   // credentials for the named handler. The host uses this for flow auto-selection.
   rpc DetectAvailableFlows(DetectAvailableFlowsRequest) returns (DetectAvailableFlowsResponse);
+
+  // ActivateServerMode transitions the handler into server mode for token serving.
+  rpc ActivateServerMode(ActivateServerModeRequest) returns (ActivateServerModeResponse);
+}
+
+message ActivateServerModeRequest {
+  bytes settings = 1;
+}
+
+message ActivateServerModeResponse {
+  string error = 1;
 }
 
 message GetProvidersRequest {}
@@ -402,6 +413,9 @@ message GetTokenRequest {
   int64 min_valid_for_seconds = 3;
   bool force_refresh = 4;
   string profile = 5;
+  string server_context = 6;  // "server" or "delegated"
+  string caller = 7;          // "server", "user", "machine"
+  string assertion = 8;       // inbound bearer for OBO
 }
 
 message GetTokenResponse {

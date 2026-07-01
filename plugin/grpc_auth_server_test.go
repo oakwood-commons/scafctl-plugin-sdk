@@ -262,6 +262,9 @@ func TestAuthGRPCServer_GetToken(t *testing.T) {
 	now := time.Now()
 	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
 		getToken: func(_ context.Context, _ string, req TokenRequest) (*TokenResponse, error) {
+			assert.Equal(t, auth.ServerContext("server"), req.ServerContext)
+			assert.Equal(t, auth.CallerType("user"), req.Caller)
+			assert.Equal(t, "inbound-jwt", req.Assertion)
 			return &TokenResponse{
 				AccessToken: "tok123", TokenType: "Bearer",
 				ExpiresAt: now, Scope: req.Scope, Flow: auth.FlowDeviceCode,
@@ -270,6 +273,7 @@ func TestAuthGRPCServer_GetToken(t *testing.T) {
 	}}
 	resp, err := srv.GetToken(context.Background(), &proto.GetTokenRequest{
 		HandlerName: "gh", Scope: "read", MinValidForSeconds: 60, ForceRefresh: true,
+		ServerContext: "server", Caller: "user", Assertion: "inbound-jwt",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "tok123", resp.AccessToken)
@@ -1021,6 +1025,64 @@ func TestAuthGRPCServer_EnsureHostClient_ClosedPreventsCommit(t *testing.T) {
 	defer srv.mu.RUnlock()
 	assert.Nil(t, srv.conn, "conn must not be committed after closeHostClient")
 	assert.Nil(t, srv.hostClient, "hostClient must not be committed after closeHostClient")
+}
+
+// --- mockServerModeHandler embeds mockAuthHandler and implements ServerMode ---
+
+type mockServerModeHandler struct {
+	mockAuthHandler
+	activateServerMode func(ctx context.Context, settings json.RawMessage) error
+}
+
+func (m *mockServerModeHandler) ActivateServerMode(ctx context.Context, settings json.RawMessage) error {
+	if m.activateServerMode != nil {
+		return m.activateServerMode(ctx, settings)
+	}
+	return nil
+}
+
+func TestAuthGRPCServer_ActivateServerMode_NotSupported(t *testing.T) {
+	// mockAuthHandler does NOT implement ServerMode
+	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{}}
+	resp, err := srv.ActivateServerMode(context.Background(), &proto.ActivateServerModeRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, "plugin does not support server mode", resp.Error)
+}
+
+func TestAuthGRPCServer_ActivateServerMode_Success(t *testing.T) {
+	srv := &AuthHandlerGRPCServer{Impl: &mockServerModeHandler{}}
+	resp, err := srv.ActivateServerMode(context.Background(), &proto.ActivateServerModeRequest{
+		Settings: []byte(`{"clientId":"test"}`),
+	})
+	require.NoError(t, err)
+	assert.Empty(t, resp.Error)
+}
+
+func TestAuthGRPCServer_ActivateServerMode_Error(t *testing.T) {
+	srv := &AuthHandlerGRPCServer{Impl: &mockServerModeHandler{
+		activateServerMode: func(_ context.Context, _ json.RawMessage) error {
+			return errors.New("validation failed")
+		},
+	}}
+	resp, err := srv.ActivateServerMode(context.Background(), &proto.ActivateServerModeRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, "validation failed", resp.Error)
+}
+
+func TestAuthGRPCServer_ActivateServerMode_PassesSettings(t *testing.T) {
+	var received json.RawMessage
+	srv := &AuthHandlerGRPCServer{Impl: &mockServerModeHandler{
+		activateServerMode: func(_ context.Context, settings json.RawMessage) error {
+			received = settings
+			return nil
+		},
+	}}
+	resp, err := srv.ActivateServerMode(context.Background(), &proto.ActivateServerModeRequest{
+		Settings: []byte(`{"clientId":"abc"}`),
+	})
+	require.NoError(t, err)
+	assert.Empty(t, resp.Error)
+	assert.JSONEq(t, `{"clientId":"abc"}`, string(received))
 }
 
 // --- suppress unused import warnings ---

@@ -24,6 +24,7 @@ const (
 	FlowGcloudADC         Flow = "gcloud_adc"
 	FlowGitHubApp         Flow = "github_app"
 	FlowClientCredentials Flow = "client_credentials"
+	FlowOnBehalfOf        Flow = "obo"
 )
 
 // DefaultMinValidFor is the default minimum validity duration for tokens.
@@ -44,9 +45,12 @@ type LoginOptions struct {
 
 // TokenOptions configures token acquisition.
 type TokenOptions struct {
-	Scope        string        `json:"scope,omitempty" yaml:"scope,omitempty"`
-	MinValidFor  time.Duration `json:"minValidFor,omitempty" yaml:"minValidFor,omitempty"`
-	ForceRefresh bool          `json:"forceRefresh,omitempty" yaml:"forceRefresh,omitempty"`
+	Scope         string        `json:"scope,omitempty" yaml:"scope,omitempty"`
+	MinValidFor   time.Duration `json:"minValidFor,omitempty" yaml:"minValidFor,omitempty"`
+	ForceRefresh  bool          `json:"forceRefresh,omitempty" yaml:"forceRefresh,omitempty"`
+	ServerContext ServerContext `json:"serverContext,omitempty" yaml:"serverContext,omitempty"`
+	Assertion     string        `json:"assertion,omitempty" yaml:"assertion,omitempty"`
+	Caller        CallerType    `json:"caller,omitempty" yaml:"caller,omitempty"`
 }
 
 // Result contains the result of a successful authentication.
@@ -153,3 +157,25 @@ type TokenLister interface {
 type TokenPurger interface {
 	PurgeExpiredTokens(ctx context.Context) (int, error)
 }
+
+// CallerType identifies who is requesting the token.
+type CallerType string
+
+const (
+	// CallerServer means the plugin authenticates as itself.
+	CallerServer CallerType = "server"
+	// CallerUser means delegated on behalf of a user (OBO).
+	CallerUser CallerType = "user"
+	// CallerMachine means delegated on behalf of another service.
+	CallerMachine CallerType = "machine"
+)
+
+// ServerContext identifies whether the request is for the server itself or delegated.
+type ServerContext string
+
+const (
+	// ServerContextServer means the server is acquiring a token as itself.
+	ServerContextServer ServerContext = "server"
+	// ServerContextDelegated means the server is acquiring a token on behalf of another identity.
+	ServerContextDelegated ServerContext = "delegated"
+)

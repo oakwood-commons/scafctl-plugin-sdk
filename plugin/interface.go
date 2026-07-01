@@ -92,9 +92,12 @@ type LoginStreamMessage struct {
 
 // TokenRequest contains parameters for a plugin GetToken call.
 type TokenRequest struct {
-	Scope        string        `json:"scope,omitempty" yaml:"scope,omitempty"`
-	MinValidFor  time.Duration `json:"minValidFor,omitempty" yaml:"minValidFor,omitempty"`
-	ForceRefresh bool          `json:"forceRefresh,omitempty" yaml:"forceRefresh,omitempty"`
+	Scope         string             `json:"scope,omitempty" yaml:"scope,omitempty"`
+	MinValidFor   time.Duration      `json:"minValidFor,omitempty" yaml:"minValidFor,omitempty"`
+	ForceRefresh  bool               `json:"forceRefresh,omitempty" yaml:"forceRefresh,omitempty"`
+	ServerContext auth.ServerContext `json:"serverContext,omitempty" yaml:"serverContext,omitempty"`
+	Caller        auth.CallerType    `json:"caller,omitempty" yaml:"caller,omitempty"`
+	Assertion     string             `json:"assertion,omitempty" yaml:"assertion,omitempty"`
 }
 
 // TokenResponse contains the result of a plugin GetToken call.
@@ -173,3 +176,9 @@ const (
 	PluginName            = "provider"
 	AuthHandlerPluginName = "auth-handler"
 )
+
+// ServerMode is an optional interface for auth handler plugins that support
+// transitioning into a long-lived server/daemon mode for issuing tokens.
+type ServerMode interface {
+	ActivateServerMode(ctx context.Context, settings json.RawMessage) error
+}

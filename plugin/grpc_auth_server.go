@@ -126,7 +126,7 @@ func (s *AuthHandlerGRPCServer) GetStatus(ctx context.Context, req *proto.GetSta
 func (s *AuthHandlerGRPCServer) GetToken(ctx context.Context, req *proto.GetTokenRequest) (*proto.GetTokenResponse, error) {
 	ctx = s.injectHostClient(ctx)
 	ctx = auth.WithProfile(ctx, req.Profile)
-	tokenReq := TokenRequest{Scope: req.Scope, MinValidFor: time.Duration(req.MinValidForSeconds) * time.Second, ForceRefresh: req.ForceRefresh}
+	tokenReq := TokenRequest{Scope: req.Scope, MinValidFor: time.Duration(req.MinValidForSeconds) * time.Second, ForceRefresh: req.ForceRefresh, ServerContext: auth.ServerContext(req.ServerContext), Caller: auth.CallerType(req.Caller), Assertion: req.Assertion}
 	token, err := s.Impl.GetToken(ctx, req.HandlerName, tokenReq)
 	if err != nil {
 		return nil, fmt.Errorf("GetToken %q: %w", req.HandlerName, err)
@@ -279,6 +279,19 @@ func (s *AuthHandlerGRPCServer) DetectAvailableFlows(ctx context.Context, req *p
 		}
 	}
 	return &proto.DetectAvailableFlowsResponse{Flows: protoFlows}, nil
+}
+
+func (s *AuthHandlerGRPCServer) ActivateServerMode(ctx context.Context, req *proto.ActivateServerModeRequest) (*proto.ActivateServerModeResponse, error) {
+	ctx = s.injectHostClient(ctx)
+
+	sm, ok := s.Impl.(ServerMode)
+	if !ok {
+		return &proto.ActivateServerModeResponse{Error: "plugin does not support server mode"}, nil //nolint:nilerr
+	}
+	if err := sm.ActivateServerMode(ctx, json.RawMessage(req.Settings)); err != nil {
+		return &proto.ActivateServerModeResponse{Error: err.Error()}, nil //nolint:nilerr
+	}
+	return &proto.ActivateServerModeResponse{}, nil
 }
 
 // ---- Conversion helpers ----
