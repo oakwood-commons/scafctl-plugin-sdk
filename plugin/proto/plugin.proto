@@ -416,6 +416,9 @@ message GetTokenRequest {
   string server_context = 6;  // "server" or "delegated"
   string caller = 7;          // "server", "user", "machine"
   string assertion = 8;       // inbound bearer for OBO
+  // hostname selects a specific instance (e.g. a cluster or server) for
+  // handlers that advertise the token_hostname capability.
+  string hostname = 9;
 }
 
 message GetTokenResponse {

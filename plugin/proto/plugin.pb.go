@@ -7,11 +7,12 @@
 package proto
 
 import (
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
+
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -2917,8 +2918,11 @@ type GetTokenRequest struct {
 	ServerContext      string                 `protobuf:"bytes,6,opt,name=server_context,json=serverContext,proto3" json:"server_context,omitempty"` // "server" or "delegated"
 	Caller             string                 `protobuf:"bytes,7,opt,name=caller,proto3" json:"caller,omitempty"`                                    // "server", "user", "machine"
 	Assertion          string                 `protobuf:"bytes,8,opt,name=assertion,proto3" json:"assertion,omitempty"`                              // inbound bearer for OBO
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// hostname selects a specific instance (e.g. a cluster or server) for
+	// handlers that advertise the token_hostname capability.
+	Hostname      string `protobuf:"bytes,9,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetTokenRequest) Reset() {
@@ -3003,6 +3007,13 @@ func (x *GetTokenRequest) GetCaller() string {
 func (x *GetTokenRequest) GetAssertion() string {
 	if x != nil {
 		return x.Assertion
+	}
+	return ""
+}
+
+func (x *GetTokenRequest) GetHostname() string {
+	if x != nil {
+		return x.Hostname
 	}
 	return ""
 }
@@ -4898,7 +4909,7 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"\x06scopes\x18\t \x03(\tR\x06scopes\x12\x16\n" +
 	"\x06reason\x18\n" +
 	" \x01(\tR\x06reason\x12\x12\n" +
-	"\x04flow\x18\v \x01(\tR\x04flow\"\x99\x02\n" +
+	"\x04flow\x18\v \x01(\tR\x04flow\"\xb5\x02\n" +
 	"\x0fGetTokenRequest\x12!\n" +
 	"\fhandler_name\x18\x01 \x01(\tR\vhandlerName\x12\x14\n" +
 	"\x05scope\x18\x02 \x01(\tR\x05scope\x121\n" +
@@ -4907,7 +4918,8 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"\aprofile\x18\x05 \x01(\tR\aprofile\x12%\n" +
 	"\x0eserver_context\x18\x06 \x01(\tR\rserverContext\x12\x16\n" +
 	"\x06caller\x18\a \x01(\tR\x06caller\x12\x1c\n" +
-	"\tassertion\x18\b \x01(\tR\tassertion\"\xeb\x01\n" +
+	"\tassertion\x18\b \x01(\tR\tassertion\x12\x1a\n" +
+	"\bhostname\x18\t \x01(\tR\bhostname\"\xeb\x01\n" +
 	"\x10GetTokenResponse\x12!\n" +
 	"\faccess_token\x18\x01 \x01(\tR\vaccessToken\x12\x1d\n" +
 	"\n" +
