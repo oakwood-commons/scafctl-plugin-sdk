@@ -27,6 +27,15 @@ const (
 	// GitHub uses this for GitHub Enterprise Server (GHES) support.
 	CapHostname Capability = "hostname"
 
+	// CapTokenHostname indicates the handler honors a hostname selector on the
+	// token-request path (GetToken), not just at login. Hosts must only populate
+	// the token hostname for handlers that advertise this capability. It is
+	// distinct from CapHostname so that older handlers built against a prior SDK,
+	// which advertise CapHostname for login only, are not sent a token hostname
+	// they would silently ignore (proto3 drops unknown fields), which would fall
+	// back to the default/most-recent token instead of the requested instance.
+	CapTokenHostname Capability = "token_hostname"
+
 	// CapFederatedToken indicates the handler supports federated token input.
 	// Entra uses this for workload identity (Kubernetes) authentication.
 	CapFederatedToken Capability = "federated_token"

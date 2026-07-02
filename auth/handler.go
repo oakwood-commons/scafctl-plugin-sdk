@@ -51,6 +51,9 @@ type TokenOptions struct {
 	ServerContext ServerContext `json:"serverContext,omitempty" yaml:"serverContext,omitempty"`
 	Assertion     string        `json:"assertion,omitempty" yaml:"assertion,omitempty"`
 	Caller        CallerType    `json:"caller,omitempty" yaml:"caller,omitempty"`
+	// Hostname selects a specific instance (e.g. a cluster or server) for
+	// handlers that advertise CapTokenHostname.
+	Hostname string `json:"hostname,omitempty" yaml:"hostname,omitempty"`
 }
 
 // Result contains the result of a successful authentication.

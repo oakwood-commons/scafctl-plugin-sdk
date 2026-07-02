@@ -98,6 +98,9 @@ type TokenRequest struct {
 	ServerContext auth.ServerContext `json:"serverContext,omitempty" yaml:"serverContext,omitempty"`
 	Caller        auth.CallerType    `json:"caller,omitempty" yaml:"caller,omitempty"`
 	Assertion     string             `json:"assertion,omitempty" yaml:"assertion,omitempty"`
+	// Hostname selects a specific instance (e.g. a cluster or server) for
+	// handlers that advertise auth.CapTokenHostname.
+	Hostname string `json:"hostname,omitempty" yaml:"hostname,omitempty"`
 }
 
 // TokenResponse contains the result of a plugin GetToken call.

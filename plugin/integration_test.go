@@ -404,6 +404,7 @@ type mockAuthPlugin struct {
 	loginResult      *plugin.LoginResponse
 	loginErr         error
 	capturedLoginReq plugin.LoginRequest
+	capturedTokenReq plugin.TokenRequest
 	statusResult     *auth.Status
 	tokenResult      *plugin.TokenResponse
 	cachedTokens     []*auth.CachedTokenInfo
@@ -445,7 +446,8 @@ func (m *mockAuthPlugin) GetStatus(_ context.Context, _ string) (*auth.Status, e
 	return m.statusResult, nil
 }
 
-func (m *mockAuthPlugin) GetToken(_ context.Context, _ string, _ plugin.TokenRequest) (*plugin.TokenResponse, error) {
+func (m *mockAuthPlugin) GetToken(_ context.Context, _ string, req plugin.TokenRequest) (*plugin.TokenResponse, error) {
+	m.capturedTokenReq = req
 	return m.tokenResult, nil
 }
 
@@ -661,6 +663,7 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 			Scope:              "read",
 			MinValidForSeconds: 60,
 			ForceRefresh:       true,
+			Hostname:           "pd1020",
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "tok-abc", resp.AccessToken)
@@ -668,6 +671,7 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 		assert.Equal(t, "read write", resp.Scope)
 		assert.Equal(t, "device_code", resp.Flow)
 		assert.Equal(t, "sess-1", resp.SessionId)
+		assert.Equal(t, "pd1020", mock.capturedTokenReq.Hostname)
 	})
 
 	t.Run("ListCachedTokens", func(t *testing.T) {

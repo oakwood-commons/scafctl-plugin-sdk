@@ -126,7 +126,7 @@ func (s *AuthHandlerGRPCServer) GetStatus(ctx context.Context, req *proto.GetSta
 func (s *AuthHandlerGRPCServer) GetToken(ctx context.Context, req *proto.GetTokenRequest) (*proto.GetTokenResponse, error) {
 	ctx = s.injectHostClient(ctx)
 	ctx = auth.WithProfile(ctx, req.Profile)
-	tokenReq := TokenRequest{Scope: req.Scope, MinValidFor: time.Duration(req.MinValidForSeconds) * time.Second, ForceRefresh: req.ForceRefresh, ServerContext: auth.ServerContext(req.ServerContext), Caller: auth.CallerType(req.Caller), Assertion: req.Assertion}
+	tokenReq := TokenRequest{Scope: req.Scope, MinValidFor: time.Duration(req.MinValidForSeconds) * time.Second, ForceRefresh: req.ForceRefresh, ServerContext: auth.ServerContext(req.ServerContext), Caller: auth.CallerType(req.Caller), Assertion: req.Assertion, Hostname: req.Hostname}
 	token, err := s.Impl.GetToken(ctx, req.HandlerName, tokenReq)
 	if err != nil {
 		return nil, fmt.Errorf("GetToken %q: %w", req.HandlerName, err)

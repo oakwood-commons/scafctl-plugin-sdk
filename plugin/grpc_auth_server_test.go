@@ -265,6 +265,7 @@ func TestAuthGRPCServer_GetToken(t *testing.T) {
 			assert.Equal(t, auth.ServerContext("server"), req.ServerContext)
 			assert.Equal(t, auth.CallerType("user"), req.Caller)
 			assert.Equal(t, "inbound-jwt", req.Assertion)
+			assert.Equal(t, "cluster-a.example.com", req.Hostname)
 			return &TokenResponse{
 				AccessToken: "tok123", TokenType: "Bearer",
 				ExpiresAt: now, Scope: req.Scope, Flow: auth.FlowDeviceCode,
@@ -274,6 +275,7 @@ func TestAuthGRPCServer_GetToken(t *testing.T) {
 	resp, err := srv.GetToken(context.Background(), &proto.GetTokenRequest{
 		HandlerName: "gh", Scope: "read", MinValidForSeconds: 60, ForceRefresh: true,
 		ServerContext: "server", Caller: "user", Assertion: "inbound-jwt",
+		Hostname: "cluster-a.example.com",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "tok123", resp.AccessToken)
