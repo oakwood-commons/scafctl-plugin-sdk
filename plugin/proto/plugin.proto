@@ -347,6 +347,12 @@ message LoginRequest {
   // hostname selects a specific instance (e.g. a cluster or server) for
   // handlers that advertise the hostname capability.
   string hostname = 7;
+  // callback_port requests a specific loopback port for the OAuth callback
+  // server, for handlers that advertise the callback_port capability. Zero
+  // preserves the handler's default (ephemeral or config-driven) behavior.
+  // When set it is expected to be an unprivileged, in-range TCP port
+  // (1024-65535); the host validates the value before sending it.
+  int32 callback_port = 8;
 }
 
 message LoginStreamMessage {
@@ -384,6 +390,9 @@ message Claims {
 message LogoutRequest {
   string handler_name = 1;
   string profile = 2;
+  // hostname selects a specific instance (e.g. a cluster or server) for
+  // handlers that advertise the instance_hostname capability.
+  string hostname = 3;
 }
 
 message LogoutResponse {}
@@ -391,6 +400,9 @@ message LogoutResponse {}
 message GetStatusRequest {
   string handler_name = 1;
   string profile = 2;
+  // hostname selects a specific instance (e.g. a cluster or server) for
+  // handlers that advertise the instance_hostname capability.
+  string hostname = 3;
 }
 
 message GetStatusResponse {

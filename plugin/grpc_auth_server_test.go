@@ -26,8 +26,8 @@ type mockAuthHandler struct {
 	getAuthHandlers      func(ctx context.Context) ([]AuthHandlerInfo, error)
 	configureAuthHandler func(ctx context.Context, name string, cfg ProviderConfig) error
 	login                func(ctx context.Context, name string, req LoginRequest, cb func(DeviceCodePrompt)) (*LoginResponse, error)
-	logout               func(ctx context.Context, name string) error
-	getStatus            func(ctx context.Context, name string) (*auth.Status, error)
+	logout               func(ctx context.Context, name string, req LogoutRequest) error
+	getStatus            func(ctx context.Context, name string, req StatusRequest) (*auth.Status, error)
 	getToken             func(ctx context.Context, name string, req TokenRequest) (*TokenResponse, error)
 	listCachedTokens     func(ctx context.Context, name string) ([]*auth.CachedTokenInfo, error)
 	purgeExpiredTokens   func(ctx context.Context, name string) (int, error)
@@ -57,16 +57,16 @@ func (m *mockAuthHandler) Login(ctx context.Context, name string, req LoginReque
 	return nil, errors.New("not implemented")
 }
 
-func (m *mockAuthHandler) Logout(ctx context.Context, name string) error {
+func (m *mockAuthHandler) Logout(ctx context.Context, name string, req LogoutRequest) error {
 	if m.logout != nil {
-		return m.logout(ctx, name)
+		return m.logout(ctx, name, req)
 	}
 	return nil
 }
 
-func (m *mockAuthHandler) GetStatus(ctx context.Context, name string) (*auth.Status, error) {
+func (m *mockAuthHandler) GetStatus(ctx context.Context, name string, req StatusRequest) (*auth.Status, error) {
 	if m.getStatus != nil {
-		return m.getStatus(ctx, name)
+		return m.getStatus(ctx, name, req)
 	}
 	return nil, nil
 }
@@ -185,9 +185,11 @@ func TestAuthGRPCServer_Login_MapsRequestFields(t *testing.T) {
 		Flow:           "device_code",
 		TimeoutSeconds: 60,
 		Hostname:       "pd1020",
+		CallbackPort:   18080,
 	}, stream)
 	require.NoError(t, err)
 	assert.Equal(t, "pd1020", captured.Hostname)
+	assert.Equal(t, 18080, captured.CallbackPort)
 	assert.Equal(t, "tenant-1", captured.TenantID)
 	assert.Equal(t, []string{"repo"}, captured.Scopes)
 	assert.Equal(t, auth.FlowDeviceCode, captured.Flow)
@@ -216,16 +218,30 @@ func TestAuthGRPCServer_Logout(t *testing.T) {
 
 func TestAuthGRPCServer_Logout_Error(t *testing.T) {
 	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
-		logout: func(_ context.Context, _ string) error { return errors.New("fail") },
+		logout: func(_ context.Context, _ string, _ LogoutRequest) error { return errors.New("fail") },
 	}}
 	_, err := srv.Logout(context.Background(), &proto.LogoutRequest{HandlerName: "gh"})
 	require.Error(t, err)
 }
 
+func TestAuthGRPCServer_Logout_MapsHostname(t *testing.T) {
+	var captured LogoutRequest
+	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
+		logout: func(_ context.Context, _ string, req LogoutRequest) error {
+			captured = req
+			return nil
+		},
+	}}
+	_, err := srv.Logout(context.Background(), &proto.LogoutRequest{HandlerName: "gh", Hostname: "cluster-a.example.com"})
+	require.NoError(t, err)
+	assert.Equal(t, "cluster-a.example.com", captured.Hostname)
+}
+
 func TestAuthGRPCServer_GetStatus(t *testing.T) {
 	now := time.Now()
 	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
-		getStatus: func(_ context.Context, _ string) (*auth.Status, error) {
+		getStatus: func(_ context.Context, _ string, req StatusRequest) (*auth.Status, error) {
+			assert.Equal(t, "cluster-a.example.com", req.Hostname)
 			return &auth.Status{
 				Authenticated: true,
 				Reason:        "token valid",
@@ -238,7 +254,7 @@ func TestAuthGRPCServer_GetStatus(t *testing.T) {
 			}, nil
 		},
 	}}
-	resp, err := srv.GetStatus(context.Background(), &proto.GetStatusRequest{HandlerName: "gh"})
+	resp, err := srv.GetStatus(context.Background(), &proto.GetStatusRequest{HandlerName: "gh", Hostname: "cluster-a.example.com"})
 	require.NoError(t, err)
 	assert.True(t, resp.Authenticated)
 	assert.Equal(t, "token valid", resp.Reason)
@@ -249,7 +265,7 @@ func TestAuthGRPCServer_GetStatus(t *testing.T) {
 
 func TestAuthGRPCServer_GetStatus_Nil(t *testing.T) {
 	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
-		getStatus: func(_ context.Context, _ string) (*auth.Status, error) {
+		getStatus: func(_ context.Context, _ string, _ StatusRequest) (*auth.Status, error) {
 			return nil, nil
 		},
 	}}
@@ -418,7 +434,7 @@ func TestAuthGRPCServer_InjectHostClient_Logout(t *testing.T) {
 	var capturedCtx context.Context
 	srv := &AuthHandlerGRPCServer{
 		Impl: &mockAuthHandler{
-			logout: func(ctx context.Context, _ string) error {
+			logout: func(ctx context.Context, _ string, _ LogoutRequest) error {
 				capturedCtx = ctx
 				return nil
 			},
@@ -438,7 +454,7 @@ func TestAuthGRPCServer_InjectHostClient_GetStatus(t *testing.T) {
 	var capturedCtx context.Context
 	srv := &AuthHandlerGRPCServer{
 		Impl: &mockAuthHandler{
-			getStatus: func(ctx context.Context, _ string) (*auth.Status, error) {
+			getStatus: func(ctx context.Context, _ string, _ StatusRequest) (*auth.Status, error) {
 				capturedCtx = ctx
 				return &auth.Status{Authenticated: true}, nil
 			},
@@ -563,7 +579,7 @@ func TestAuthGRPCServer_ProfilePropagation(t *testing.T) {
 	t.Run("Logout", func(t *testing.T) {
 		var capturedCtx context.Context
 		srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
-			logout: func(ctx context.Context, _ string) error {
+			logout: func(ctx context.Context, _ string, _ LogoutRequest) error {
 				capturedCtx = ctx
 				return nil
 			},
@@ -576,7 +592,7 @@ func TestAuthGRPCServer_ProfilePropagation(t *testing.T) {
 	t.Run("GetStatus", func(t *testing.T) {
 		var capturedCtx context.Context
 		srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
-			getStatus: func(ctx context.Context, _ string) (*auth.Status, error) {
+			getStatus: func(ctx context.Context, _ string, _ StatusRequest) (*auth.Status, error) {
 				capturedCtx = ctx
 				return &auth.Status{Authenticated: true}, nil
 			},
@@ -923,7 +939,7 @@ func TestAuthGRPCServer_PurgeExpiredTokens_Overflow(t *testing.T) {
 
 func TestAuthGRPCServer_GetStatus_Error(t *testing.T) {
 	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
-		getStatus: func(_ context.Context, _ string) (*auth.Status, error) {
+		getStatus: func(_ context.Context, _ string, _ StatusRequest) (*auth.Status, error) {
 			return nil, errors.New("status fail")
 		},
 	}}

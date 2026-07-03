@@ -108,7 +108,7 @@ func TestLogout(t *testing.T) {
 			p := newStaticAuth()
 			// Login first, then logout.
 			_, _ = p.Login(context.Background(), "static", plugin.LoginRequest{}, nil)
-			err := p.Logout(context.Background(), tc.handler)
+			err := p.Logout(context.Background(), tc.handler, plugin.LogoutRequest{})
 			if tc.wantErr != "" {
 				require.EqualError(t, err, tc.wantErr)
 				return
@@ -151,7 +151,7 @@ func TestGetStatus(t *testing.T) {
 			if tc.login {
 				_, _ = p.Login(context.Background(), "static", plugin.LoginRequest{}, nil)
 			}
-			status, err := p.GetStatus(context.Background(), tc.handler)
+			status, err := p.GetStatus(context.Background(), tc.handler, plugin.StatusRequest{})
 			if tc.wantErr != "" {
 				require.EqualError(t, err, tc.wantErr)
 				return
