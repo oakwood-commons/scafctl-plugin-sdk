@@ -398,20 +398,22 @@ func TestIntegration_ExecuteProviderStream_Error(t *testing.T) {
 // --- Auth Handler Plugin Integration Tests ---
 
 type mockAuthPlugin struct {
-	handlers         []plugin.AuthHandlerInfo
-	configuredNames  []string
-	configuredCfgs   []plugin.ProviderConfig
-	loginResult      *plugin.LoginResponse
-	loginErr         error
-	capturedLoginReq plugin.LoginRequest
-	capturedTokenReq plugin.TokenRequest
-	statusResult     *auth.Status
-	tokenResult      *plugin.TokenResponse
-	cachedTokens     []*auth.CachedTokenInfo
-	purgedCount      int
-	availableFlows   []plugin.FlowAvailability
-	stoppedHandlers  []string
-	loggedOutHandler string
+	handlers          []plugin.AuthHandlerInfo
+	configuredNames   []string
+	configuredCfgs    []plugin.ProviderConfig
+	loginResult       *plugin.LoginResponse
+	loginErr          error
+	capturedLoginReq  plugin.LoginRequest
+	capturedTokenReq  plugin.TokenRequest
+	capturedStatusReq plugin.StatusRequest
+	capturedLogoutReq plugin.LogoutRequest
+	statusResult      *auth.Status
+	tokenResult       *plugin.TokenResponse
+	cachedTokens      []*auth.CachedTokenInfo
+	purgedCount       int
+	availableFlows    []plugin.FlowAvailability
+	stoppedHandlers   []string
+	loggedOutHandler  string
 }
 
 func (m *mockAuthPlugin) GetAuthHandlers(_ context.Context) ([]plugin.AuthHandlerInfo, error) {
@@ -437,12 +439,14 @@ func (m *mockAuthPlugin) Login(_ context.Context, _ string, req plugin.LoginRequ
 	return m.loginResult, nil
 }
 
-func (m *mockAuthPlugin) Logout(_ context.Context, name string) error {
+func (m *mockAuthPlugin) Logout(_ context.Context, name string, req plugin.LogoutRequest) error {
 	m.loggedOutHandler = name
+	m.capturedLogoutReq = req
 	return nil
 }
 
-func (m *mockAuthPlugin) GetStatus(_ context.Context, _ string) (*auth.Status, error) {
+func (m *mockAuthPlugin) GetStatus(_ context.Context, _ string, req plugin.StatusRequest) (*auth.Status, error) {
+	m.capturedStatusReq = req
 	return m.statusResult, nil
 }
 
@@ -586,6 +590,7 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 			TenantId:       "tenant-1",
 			TimeoutSeconds: 300,
 			Hostname:       "pd1020",
+			CallbackPort:   18080,
 		})
 		require.NoError(t, err)
 
@@ -612,6 +617,7 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 		assert.Equal(t, "Test User", result.Claims.Name)
 
 		assert.Equal(t, "pd1020", mock.capturedLoginReq.Hostname)
+		assert.Equal(t, 18080, mock.capturedLoginReq.CallbackPort)
 		assert.Equal(t, "tenant-1", mock.capturedLoginReq.TenantID)
 	})
 
@@ -642,19 +648,21 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 	})
 
 	t.Run("Logout", func(t *testing.T) {
-		resp, err := client.Logout(ctx, &proto.LogoutRequest{HandlerName: "github"})
+		resp, err := client.Logout(ctx, &proto.LogoutRequest{HandlerName: "github", Hostname: "cluster-a"})
 		require.NoError(t, err)
 		assert.NotNil(t, resp)
+		assert.Equal(t, "cluster-a", mock.capturedLogoutReq.Hostname)
 	})
 
 	t.Run("GetStatus", func(t *testing.T) {
-		resp, err := client.GetStatus(ctx, &proto.GetStatusRequest{HandlerName: "github"})
+		resp, err := client.GetStatus(ctx, &proto.GetStatusRequest{HandlerName: "github", Hostname: "cluster-b"})
 		require.NoError(t, err)
 		assert.True(t, resp.Authenticated)
 		assert.Equal(t, "user123", resp.Claims.Subject)
 		assert.Equal(t, "tenant-1", resp.TenantId)
 		assert.Equal(t, "user", resp.IdentityType)
 		assert.Equal(t, []string{"read", "write"}, resp.Scopes)
+		assert.Equal(t, "cluster-b", mock.capturedStatusReq.Hostname)
 	})
 
 	t.Run("GetToken", func(t *testing.T) {

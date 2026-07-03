@@ -36,6 +36,14 @@ const (
 	// back to the default/most-recent token instead of the requested instance.
 	CapTokenHostname Capability = "token_hostname"
 
+	// CapInstanceHostname indicates the handler honors a hostname selector on the
+	// status and logout paths (GetStatus/Logout), letting a caller report or
+	// clear a single instance's credential from a per-instance cache. Hosts must
+	// only populate the status/logout hostname for handlers that advertise this
+	// capability; older handlers that ignore it preserve their current behavior
+	// (status reports the default instance; logout clears all instances).
+	CapInstanceHostname Capability = "instance_hostname"
+
 	// CapFederatedToken indicates the handler supports federated token input.
 	// Entra uses this for workload identity (Kubernetes) authentication.
 	CapFederatedToken Capability = "federated_token"

@@ -68,6 +68,13 @@ type LoginRequest struct {
 	// Hostname selects a specific instance (e.g. a cluster or server) for
 	// handlers that advertise auth.CapHostname.
 	Hostname string `json:"hostname,omitempty" yaml:"hostname,omitempty"`
+	// CallbackPort requests a specific loopback port for the OAuth callback
+	// server, for handlers that advertise auth.CapCallbackPort. A zero value
+	// preserves the handler's default (ephemeral or config-driven) behavior.
+	// When set, it is expected to be an unprivileged, in-range TCP port
+	// (1024-65535); the host is responsible for validating the value before
+	// sending it, and handlers should treat out-of-range values as unset.
+	CallbackPort int `json:"callbackPort,omitempty" yaml:"callbackPort,omitempty"`
 }
 
 // LoginResponse contains the result of a plugin Login call.
@@ -114,6 +121,20 @@ type TokenResponse struct {
 	SessionID   string    `json:"sessionId,omitempty" yaml:"sessionId,omitempty"`
 }
 
+// StatusRequest contains parameters for a plugin GetStatus call.
+type StatusRequest struct {
+	// Hostname selects a specific instance (e.g. a cluster or server) for
+	// handlers that advertise auth.CapInstanceHostname.
+	Hostname string `json:"hostname,omitempty" yaml:"hostname,omitempty"`
+}
+
+// LogoutRequest contains parameters for a plugin Logout call.
+type LogoutRequest struct {
+	// Hostname selects a specific instance (e.g. a cluster or server) for
+	// handlers that advertise auth.CapInstanceHostname.
+	Hostname string `json:"hostname,omitempty" yaml:"hostname,omitempty"`
+}
+
 // FlowAvailability reports whether a specific auth flow is available based on
 // environment credentials or configuration.
 type FlowAvailability struct {
@@ -127,8 +148,8 @@ type AuthHandlerPlugin interface {
 	GetAuthHandlers(ctx context.Context) ([]AuthHandlerInfo, error)
 	ConfigureAuthHandler(ctx context.Context, handlerName string, cfg ProviderConfig) error
 	Login(ctx context.Context, handlerName string, req LoginRequest, deviceCodeCb func(DeviceCodePrompt)) (*LoginResponse, error)
-	Logout(ctx context.Context, handlerName string) error
-	GetStatus(ctx context.Context, handlerName string) (*auth.Status, error)
+	Logout(ctx context.Context, handlerName string, req LogoutRequest) error
+	GetStatus(ctx context.Context, handlerName string, req StatusRequest) (*auth.Status, error)
 	GetToken(ctx context.Context, handlerName string, req TokenRequest) (*TokenResponse, error)
 	ListCachedTokens(ctx context.Context, handlerName string) ([]*auth.CachedTokenInfo, error)
 	PurgeExpiredTokens(ctx context.Context, handlerName string) (int, error)

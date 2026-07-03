@@ -57,7 +57,7 @@ func (p *StaticAuthPlugin) Login(_ context.Context, name string, _ plugin.LoginR
 	}, nil
 }
 
-func (p *StaticAuthPlugin) Logout(_ context.Context, name string) error {
+func (p *StaticAuthPlugin) Logout(_ context.Context, name string, _ plugin.LogoutRequest) error {
 	if name != handlerName {
 		return fmt.Errorf("unknown handler: %s", name)
 	}
@@ -66,7 +66,7 @@ func (p *StaticAuthPlugin) Logout(_ context.Context, name string) error {
 	return nil
 }
 
-func (p *StaticAuthPlugin) GetStatus(_ context.Context, name string) (*auth.Status, error) {
+func (p *StaticAuthPlugin) GetStatus(_ context.Context, name string, _ plugin.StatusRequest) (*auth.Status, error) {
 	if name != handlerName {
 		return nil, fmt.Errorf("unknown handler: %s", name)
 	}

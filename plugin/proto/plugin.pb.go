@@ -2234,7 +2234,13 @@ type LoginRequest struct {
 	Profile        string                 `protobuf:"bytes,6,opt,name=profile,proto3" json:"profile,omitempty"`
 	// hostname selects a specific instance (e.g. a cluster or server) for
 	// handlers that advertise the hostname capability.
-	Hostname      string `protobuf:"bytes,7,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	Hostname string `protobuf:"bytes,7,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	// callback_port requests a specific loopback port for the OAuth callback
+	// server, for handlers that advertise the callback_port capability. Zero
+	// preserves the handler's default (ephemeral or config-driven) behavior.
+	// When set it is expected to be an unprivileged, in-range TCP port
+	// (1024-65535); the host validates the value before sending it.
+	CallbackPort  int32 `protobuf:"varint,8,opt,name=callback_port,json=callbackPort,proto3" json:"callback_port,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2316,6 +2322,13 @@ func (x *LoginRequest) GetHostname() string {
 		return x.Hostname
 	}
 	return ""
+}
+
+func (x *LoginRequest) GetCallbackPort() int32 {
+	if x != nil {
+		return x.CallbackPort
+	}
+	return 0
 }
 
 type LoginStreamMessage struct {
@@ -2645,9 +2658,12 @@ func (x *Claims) GetExpiresAtUnix() int64 {
 }
 
 type LogoutRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	HandlerName   string                 `protobuf:"bytes,1,opt,name=handler_name,json=handlerName,proto3" json:"handler_name,omitempty"`
-	Profile       string                 `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	HandlerName string                 `protobuf:"bytes,1,opt,name=handler_name,json=handlerName,proto3" json:"handler_name,omitempty"`
+	Profile     string                 `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	// hostname selects a specific instance (e.g. a cluster or server) for
+	// handlers that advertise the instance_hostname capability.
+	Hostname      string `protobuf:"bytes,3,opt,name=hostname,proto3" json:"hostname,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2696,6 +2712,13 @@ func (x *LogoutRequest) GetProfile() string {
 	return ""
 }
 
+func (x *LogoutRequest) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
+}
+
 type LogoutResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -2733,9 +2756,12 @@ func (*LogoutResponse) Descriptor() ([]byte, []int) {
 }
 
 type GetStatusRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	HandlerName   string                 `protobuf:"bytes,1,opt,name=handler_name,json=handlerName,proto3" json:"handler_name,omitempty"`
-	Profile       string                 `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	HandlerName string                 `protobuf:"bytes,1,opt,name=handler_name,json=handlerName,proto3" json:"handler_name,omitempty"`
+	Profile     string                 `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	// hostname selects a specific instance (e.g. a cluster or server) for
+	// handlers that advertise the instance_hostname capability.
+	Hostname      string `protobuf:"bytes,3,opt,name=hostname,proto3" json:"hostname,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2780,6 +2806,13 @@ func (x *GetStatusRequest) GetHandlerName() string {
 func (x *GetStatusRequest) GetProfile() string {
 	if x != nil {
 		return x.Profile
+	}
+	return ""
+}
+
+func (x *GetStatusRequest) GetHostname() string {
+	if x != nil {
+		return x.Hostname
 	}
 	return ""
 }
@@ -4856,7 +4889,7 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\x14\n" +
 	"\x05flows\x18\x03 \x03(\tR\x05flows\x12\"\n" +
-	"\fcapabilities\x18\x04 \x03(\tR\fcapabilities\"\xd9\x01\n" +
+	"\fcapabilities\x18\x04 \x03(\tR\fcapabilities\"\xfe\x01\n" +
 	"\fLoginRequest\x12!\n" +
 	"\fhandler_name\x18\x01 \x01(\tR\vhandlerName\x12\x1b\n" +
 	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x16\n" +
@@ -4864,7 +4897,8 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"\x04flow\x18\x04 \x01(\tR\x04flow\x12'\n" +
 	"\x0ftimeout_seconds\x18\x05 \x01(\x03R\x0etimeoutSeconds\x12\x18\n" +
 	"\aprofile\x18\x06 \x01(\tR\aprofile\x12\x1a\n" +
-	"\bhostname\x18\a \x01(\tR\bhostname\"\xb0\x01\n" +
+	"\bhostname\x18\a \x01(\tR\bhostname\x12#\n" +
+	"\rcallback_port\x18\b \x01(\x05R\fcallbackPort\"\xb0\x01\n" +
 	"\x12LoginStreamMessage\x12H\n" +
 	"\x12device_code_prompt\x18\x01 \x01(\v2\x18.plugin.DeviceCodePromptH\x00R\x10deviceCodePrompt\x12-\n" +
 	"\x06result\x18\x02 \x01(\v2\x13.plugin.LoginResultH\x00R\x06result\x12\x16\n" +
@@ -4888,14 +4922,16 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"\busername\x18\b \x01(\tR\busername\x12$\n" +
 	"\x0eissued_at_unix\x18\t \x01(\x03R\fissuedAtUnix\x12&\n" +
 	"\x0fexpires_at_unix\x18\n" +
-	" \x01(\x03R\rexpiresAtUnix\"L\n" +
+	" \x01(\x03R\rexpiresAtUnix\"h\n" +
 	"\rLogoutRequest\x12!\n" +
 	"\fhandler_name\x18\x01 \x01(\tR\vhandlerName\x12\x18\n" +
-	"\aprofile\x18\x02 \x01(\tR\aprofile\"\x10\n" +
-	"\x0eLogoutResponse\"O\n" +
+	"\aprofile\x18\x02 \x01(\tR\aprofile\x12\x1a\n" +
+	"\bhostname\x18\x03 \x01(\tR\bhostname\"\x10\n" +
+	"\x0eLogoutResponse\"k\n" +
 	"\x10GetStatusRequest\x12!\n" +
 	"\fhandler_name\x18\x01 \x01(\tR\vhandlerName\x12\x18\n" +
-	"\aprofile\x18\x02 \x01(\tR\aprofile\"\xf7\x02\n" +
+	"\aprofile\x18\x02 \x01(\tR\aprofile\x12\x1a\n" +
+	"\bhostname\x18\x03 \x01(\tR\bhostname\"\xf7\x02\n" +
 	"\x11GetStatusResponse\x12$\n" +
 	"\rauthenticated\x18\x01 \x01(\bR\rauthenticated\x12&\n" +
 	"\x06claims\x18\x02 \x01(\v2\x0e.plugin.ClaimsR\x06claims\x12&\n" +

@@ -66,6 +66,7 @@ func TestCapabilityConstants(t *testing.T) {
 	assert.Equal(t, Capability("tenant_id"), CapTenantID)
 	assert.Equal(t, Capability("hostname"), CapHostname)
 	assert.Equal(t, Capability("token_hostname"), CapTokenHostname)
+	assert.Equal(t, Capability("instance_hostname"), CapInstanceHostname)
 	assert.Equal(t, Capability("federated_token"), CapFederatedToken)
 	assert.Equal(t, Capability("callback_port"), CapCallbackPort)
 	assert.Equal(t, Capability("flow_override"), CapFlowOverride)

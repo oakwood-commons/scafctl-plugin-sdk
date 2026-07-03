@@ -81,7 +81,7 @@ func (s *AuthHandlerGRPCServer) Login(req *proto.LoginRequest, stream grpc.Serve
 	loginReq := LoginRequest{
 		TenantID: req.TenantId, Scopes: req.Scopes,
 		Flow: auth.Flow(req.Flow), Timeout: time.Duration(req.TimeoutSeconds) * time.Second,
-		Hostname: req.Hostname,
+		Hostname: req.Hostname, CallbackPort: int(req.CallbackPort),
 	}
 	result, err := s.Impl.Login(ctx, req.HandlerName, loginReq, deviceCodeCb)
 	if err != nil {
@@ -107,7 +107,7 @@ func (s *AuthHandlerGRPCServer) Login(req *proto.LoginRequest, stream grpc.Serve
 func (s *AuthHandlerGRPCServer) Logout(ctx context.Context, req *proto.LogoutRequest) (*proto.LogoutResponse, error) {
 	ctx = s.injectHostClient(ctx)
 	ctx = auth.WithProfile(ctx, req.Profile)
-	if err := s.Impl.Logout(ctx, req.HandlerName); err != nil {
+	if err := s.Impl.Logout(ctx, req.HandlerName, LogoutRequest{Hostname: req.Hostname}); err != nil {
 		return nil, fmt.Errorf("Logout %q: %w", req.HandlerName, err)
 	}
 	return &proto.LogoutResponse{}, nil
@@ -116,7 +116,7 @@ func (s *AuthHandlerGRPCServer) Logout(ctx context.Context, req *proto.LogoutReq
 func (s *AuthHandlerGRPCServer) GetStatus(ctx context.Context, req *proto.GetStatusRequest) (*proto.GetStatusResponse, error) {
 	ctx = s.injectHostClient(ctx)
 	ctx = auth.WithProfile(ctx, req.Profile)
-	st, err := s.Impl.GetStatus(ctx, req.HandlerName)
+	st, err := s.Impl.GetStatus(ctx, req.HandlerName, StatusRequest{Hostname: req.Hostname})
 	if err != nil {
 		return nil, fmt.Errorf("GetStatus %q: %w", req.HandlerName, err)
 	}
