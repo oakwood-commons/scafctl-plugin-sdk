@@ -128,13 +128,14 @@ func (p *MultiClusterAuthPlugin) GetStatus(_ context.Context, name string, req p
 	sess := p.sessions[req.Hostname]
 	p.mu.Unlock()
 	if sess == nil {
-		return &auth.Status{Authenticated: false, Reason: "no session for instance"}, nil
+		return &auth.Status{Authenticated: false, Reason: "no session for instance", Hostname: req.Hostname}, nil
 	}
 	return &auth.Status{
 		Authenticated: true,
 		Claims:        sess.claims,
 		ExpiresAt:     sess.expiresAt,
 		IdentityType:  auth.IdentityTypeUser,
+		Hostname:      req.Hostname,
 	}, nil
 }
 
@@ -171,10 +172,11 @@ func (p *MultiClusterAuthPlugin) ListCachedTokens(_ context.Context, name string
 	for _, host := range hosts {
 		sess := p.sessions[host]
 		tokens = append(tokens, &auth.CachedTokenInfo{
-			// Handler is the auth handler name, per the SDK contract. The
-			// per-instance hostname is surfaced via SessionID.
+			// Handler is the auth handler name; Hostname carries the per-instance
+			// identifier for handlers advertising auth.CapInstanceHostname, so the
+			// host can enumerate one entry per live cluster.
 			Handler:   handlerName,
-			SessionID: host,
+			Hostname:  host,
 			TokenKind: "access",
 			TokenType: "Bearer",
 			IsExpired: time.Now().After(sess.expiresAt),

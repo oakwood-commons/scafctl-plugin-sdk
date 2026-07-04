@@ -525,6 +525,7 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 			TenantID:     "tenant-1",
 			IdentityType: auth.IdentityTypeUser,
 			Scopes:       []string{"read", "write"},
+			Hostname:     "cluster-b",
 		},
 		tokenResult: &plugin.TokenResponse{
 			AccessToken: "tok-abc",
@@ -539,7 +540,7 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 				Handler: "github", TokenKind: "access_token", Scope: "read",
 				TokenType: "Bearer", Flow: auth.FlowDeviceCode,
 				ExpiresAt: now.Add(time.Hour), CachedAt: now,
-				IsExpired: false, SessionID: "sess-1",
+				IsExpired: false, SessionID: "sess-1", Hostname: "cluster-a",
 			},
 		},
 		purgedCount: 3,
@@ -662,6 +663,7 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 		assert.Equal(t, "tenant-1", resp.TenantId)
 		assert.Equal(t, "user", resp.IdentityType)
 		assert.Equal(t, []string{"read", "write"}, resp.Scopes)
+		assert.Equal(t, "cluster-b", resp.Hostname)
 		assert.Equal(t, "cluster-b", mock.capturedStatusReq.Hostname)
 	})
 
@@ -690,6 +692,7 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 		assert.Equal(t, "access_token", resp.Tokens[0].TokenKind)
 		assert.Equal(t, "device_code", resp.Tokens[0].Flow)
 		assert.False(t, resp.Tokens[0].IsExpired)
+		assert.Equal(t, "cluster-a", resp.Tokens[0].Hostname)
 	})
 
 	t.Run("PurgeExpiredTokens", func(t *testing.T) {

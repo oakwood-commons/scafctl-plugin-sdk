@@ -111,6 +111,38 @@ func TestCachedTokenInfo_TimeUntilExpiry(t *testing.T) {
 	assert.Equal(t, time.Duration(0), nilInfo.TimeUntilExpiry())
 }
 
+func TestCachedTokenInfo_HostnameJSON(t *testing.T) {
+	info := CachedTokenInfo{Handler: "openshift", Hostname: "cluster-a.example.com", TokenKind: "access"}
+	data, err := json.Marshal(info)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"hostname":"cluster-a.example.com"`)
+
+	var round CachedTokenInfo
+	require.NoError(t, json.Unmarshal(data, &round))
+	assert.Equal(t, "cluster-a.example.com", round.Hostname)
+
+	// Empty Hostname is omitted for non-instance handlers.
+	data, err = json.Marshal(CachedTokenInfo{Handler: "github", TokenKind: "access"})
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "hostname")
+}
+
+func TestStatus_HostnameJSON(t *testing.T) {
+	s := Status{Authenticated: true, Hostname: "cluster-a.example.com"}
+	data, err := json.Marshal(s)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"hostname":"cluster-a.example.com"`)
+
+	var round Status
+	require.NoError(t, json.Unmarshal(data, &round))
+	assert.Equal(t, "cluster-a.example.com", round.Hostname)
+
+	// Empty Hostname is omitted for non-instance handlers.
+	data, err = json.Marshal(Status{Authenticated: true})
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "hostname")
+}
+
 func TestIdentityTypeConstants(t *testing.T) {
 	assert.Equal(t, IdentityType("user"), IdentityTypeUser)
 	assert.Equal(t, IdentityType("service-principal"), IdentityTypeServicePrincipal)

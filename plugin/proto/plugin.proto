@@ -417,6 +417,10 @@ message GetStatusResponse {
   repeated string scopes = 9;
   string reason = 10;
   string flow = 11;
+  // hostname identifies the instance (cluster/server) this status reports on.
+  // Handlers advertising instance_hostname set it; empty for non-instance
+  // handlers.
+  string hostname = 12;
 }
 
 message GetTokenRequest {
@@ -463,6 +467,10 @@ message CachedTokenInfo {
   bool is_expired = 8;
   string session_id = 9;
   string fingerprint = 10;
+  // hostname identifies the instance (cluster/server) the session belongs to.
+  // Handlers advertising instance_hostname populate it for per-instance
+  // enumeration; empty for non-instance handlers.
+  string hostname = 11;
 }
 
 message PurgeExpiredTokensRequest {

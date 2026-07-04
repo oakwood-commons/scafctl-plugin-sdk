@@ -151,6 +151,9 @@ type AuthHandlerPlugin interface {
 	Logout(ctx context.Context, handlerName string, req LogoutRequest) error
 	GetStatus(ctx context.Context, handlerName string, req StatusRequest) (*auth.Status, error)
 	GetToken(ctx context.Context, handlerName string, req TokenRequest) (*TokenResponse, error)
+	// ListCachedTokens enumerates the handler's cached tokens. Handlers that
+	// advertise auth.CapInstanceHostname SHOULD return one entry per live
+	// instance, each with CachedTokenInfo.Hostname set to that instance.
 	ListCachedTokens(ctx context.Context, handlerName string) ([]*auth.CachedTokenInfo, error)
 	PurgeExpiredTokens(ctx context.Context, handlerName string) (int, error)
 	DetectAvailableFlows(ctx context.Context, handlerName string) ([]FlowAvailability, error)

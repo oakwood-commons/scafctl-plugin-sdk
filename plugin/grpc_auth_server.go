@@ -324,7 +324,7 @@ func statusToProto(s *auth.Status) *proto.GetStatusResponse {
 		ExpiresAtUnix: safeUnix(s.ExpiresAt), LastRefreshUnix: safeUnix(s.LastRefresh),
 		TenantId: s.TenantID, IdentityType: string(s.IdentityType),
 		ClientId: s.ClientID, TokenFile: s.TokenFile, Scopes: s.Scopes,
-		Flow: string(s.Flow),
+		Flow: string(s.Flow), Hostname: s.Hostname,
 	}
 }
 
@@ -344,7 +344,7 @@ func cachedTokenInfoToProto(t *auth.CachedTokenInfo) *proto.CachedTokenInfo {
 		return &proto.CachedTokenInfo{}
 	}
 	return &proto.CachedTokenInfo{
-		Handler: t.Handler, TokenKind: t.TokenKind, Scope: t.Scope,
+		Handler: t.Handler, Hostname: t.Hostname, TokenKind: t.TokenKind, Scope: t.Scope,
 		TokenType: t.TokenType, Flow: string(t.Flow), Fingerprint: t.Fingerprint,
 		ExpiresAtUnix: safeUnix(t.ExpiresAt), CachedAtUnix: safeUnix(t.CachedAt),
 		IsExpired: t.IsExpired, SessionId: t.SessionID,

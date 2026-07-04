@@ -773,6 +773,7 @@ func TestStatusToProto(t *testing.T) {
 		TokenFile:     "/tmp/tok",
 		Scopes:        []string{"read", "write"},
 		Flow:          auth.FlowDeviceCode,
+		Hostname:      "cluster-a",
 	}
 	resp := statusToProto(s)
 	assert.True(t, resp.Authenticated)
@@ -786,6 +787,7 @@ func TestStatusToProto(t *testing.T) {
 	assert.Equal(t, "/tmp/tok", resp.TokenFile)
 	assert.Equal(t, []string{"read", "write"}, resp.Scopes)
 	assert.Equal(t, "device_code", resp.Flow)
+	assert.Equal(t, "cluster-a", resp.Hostname)
 }
 
 func TestTokenResponseToProto_Nil(t *testing.T) {
@@ -813,12 +815,13 @@ func TestCachedTokenInfoToProto_Nil(t *testing.T) {
 
 func TestCachedTokenInfoToProto(t *testing.T) {
 	info := &auth.CachedTokenInfo{
-		Handler: "gh", TokenKind: "access", Scope: "read",
+		Handler: "gh", Hostname: "cluster-a", TokenKind: "access", Scope: "read",
 		Flow: auth.FlowPAT, IsExpired: true, SessionID: "sess",
 		Fingerprint: "abc123",
 	}
 	resp := cachedTokenInfoToProto(info)
 	assert.Equal(t, "gh", resp.Handler)
+	assert.Equal(t, "cluster-a", resp.Hostname)
 	assert.True(t, resp.IsExpired)
 	assert.Equal(t, "pat", resp.Flow)
 	assert.Equal(t, "abc123", resp.Fingerprint)

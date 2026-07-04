@@ -73,10 +73,12 @@ func TestGetStatus_IsScopedByHostname(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, authed.Authenticated)
 	assert.Equal(t, "user@cluster-a", authed.Claims.Subject)
+	assert.Equal(t, "cluster-a", authed.Hostname)
 
 	unauthed, err := p.GetStatus(ctx, handlerName, plugin.StatusRequest{Hostname: "cluster-b"})
 	require.NoError(t, err)
 	assert.False(t, unauthed.Authenticated)
+	assert.Equal(t, "cluster-b", unauthed.Hostname)
 }
 
 func TestLogout_ClearsOnlySelectedInstance(t *testing.T) {
@@ -128,13 +130,16 @@ func TestListAndPurge(t *testing.T) {
 	ctx := context.Background()
 	_, err := p.Login(ctx, handlerName, plugin.LoginRequest{Hostname: "cluster-a"}, nil)
 	require.NoError(t, err)
+	_, err = p.Login(ctx, handlerName, plugin.LoginRequest{Hostname: "cluster-b"}, nil)
+	require.NoError(t, err)
 
 	tokens, err := p.ListCachedTokens(ctx, handlerName)
 	require.NoError(t, err)
-	require.Len(t, tokens, 1)
-	// Handler is the auth handler name (SDK contract); the instance is in SessionID.
+	// One entry per live instance, keyed by Hostname (deterministic order).
+	require.Len(t, tokens, 2)
 	assert.Equal(t, handlerName, tokens[0].Handler)
-	assert.Equal(t, "cluster-a", tokens[0].SessionID)
+	assert.Equal(t, "cluster-a", tokens[0].Hostname)
+	assert.Equal(t, "cluster-b", tokens[1].Hostname)
 
 	// Nothing is expired yet.
 	purged, err := p.PurgeExpiredTokens(ctx, handlerName)

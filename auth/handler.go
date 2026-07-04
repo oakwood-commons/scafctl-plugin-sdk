@@ -84,6 +84,12 @@ type Status struct {
 	TokenFile     string       `json:"tokenFile,omitempty" yaml:"tokenFile,omitempty"`
 	Scopes        []string     `json:"scopes,omitempty" yaml:"scopes,omitempty"`
 	Flow          Flow         `json:"flow,omitempty" yaml:"flow,omitempty"`
+	// Hostname identifies the instance (cluster/server) this status reports on.
+	// Handlers that advertise auth.CapInstanceHostname set it so a host can label
+	// a per-cluster status row straight from GetStatus; it is empty ("") for
+	// non-instance handlers. The zero value preserves the prior behavior, so this
+	// field is backward compatible.
+	Hostname string `json:"hostname,omitempty" yaml:"hostname,omitempty"`
 }
 
 // Token represents a short-lived access token.
@@ -120,7 +126,13 @@ func (t *Token) TimeUntilExpiry() time.Duration {
 
 // CachedTokenInfo holds display metadata for a cached token.
 type CachedTokenInfo struct {
-	Handler     string    `json:"handler" yaml:"handler"`
+	Handler string `json:"handler" yaml:"handler"`
+	// Hostname identifies the instance (cluster/server) the session belongs to.
+	// Handlers that advertise auth.CapInstanceHostname populate it so a host can
+	// enumerate one entry per live instance and render cluster-aware status; it
+	// is empty ("") for non-instance handlers. The zero value preserves the
+	// prior behavior, so this field is backward compatible.
+	Hostname    string    `json:"hostname,omitempty" yaml:"hostname,omitempty"`
 	TokenKind   string    `json:"tokenKind" yaml:"tokenKind"`
 	Scope       string    `json:"scope,omitempty" yaml:"scope,omitempty"`
 	TokenType   string    `json:"tokenType,omitempty" yaml:"tokenType,omitempty"`

@@ -2830,8 +2830,12 @@ type GetStatusResponse struct {
 	Scopes          []string               `protobuf:"bytes,9,rep,name=scopes,proto3" json:"scopes,omitempty"`
 	Reason          string                 `protobuf:"bytes,10,opt,name=reason,proto3" json:"reason,omitempty"`
 	Flow            string                 `protobuf:"bytes,11,opt,name=flow,proto3" json:"flow,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// hostname identifies the instance (cluster/server) this status reports on.
+	// Handlers advertising instance_hostname set it; empty for non-instance
+	// handlers.
+	Hostname      string `protobuf:"bytes,12,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetStatusResponse) Reset() {
@@ -2937,6 +2941,13 @@ func (x *GetStatusResponse) GetReason() string {
 func (x *GetStatusResponse) GetFlow() string {
 	if x != nil {
 		return x.Flow
+	}
+	return ""
+}
+
+func (x *GetStatusResponse) GetHostname() string {
+	if x != nil {
+		return x.Hostname
 	}
 	return ""
 }
@@ -3251,6 +3262,10 @@ type CachedTokenInfo struct {
 	IsExpired     bool                   `protobuf:"varint,8,opt,name=is_expired,json=isExpired,proto3" json:"is_expired,omitempty"`
 	SessionId     string                 `protobuf:"bytes,9,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	Fingerprint   string                 `protobuf:"bytes,10,opt,name=fingerprint,proto3" json:"fingerprint,omitempty"`
+	// hostname identifies the instance (cluster/server) the session belongs to.
+	// Handlers advertising instance_hostname populate it for per-instance
+	// enumeration; empty for non-instance handlers.
+	Hostname      string `protobuf:"bytes,11,opt,name=hostname,proto3" json:"hostname,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3351,6 +3366,13 @@ func (x *CachedTokenInfo) GetSessionId() string {
 func (x *CachedTokenInfo) GetFingerprint() string {
 	if x != nil {
 		return x.Fingerprint
+	}
+	return ""
+}
+
+func (x *CachedTokenInfo) GetHostname() string {
+	if x != nil {
+		return x.Hostname
 	}
 	return ""
 }
@@ -4931,7 +4953,7 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"\x10GetStatusRequest\x12!\n" +
 	"\fhandler_name\x18\x01 \x01(\tR\vhandlerName\x12\x18\n" +
 	"\aprofile\x18\x02 \x01(\tR\aprofile\x12\x1a\n" +
-	"\bhostname\x18\x03 \x01(\tR\bhostname\"\xf7\x02\n" +
+	"\bhostname\x18\x03 \x01(\tR\bhostname\"\x93\x03\n" +
 	"\x11GetStatusResponse\x12$\n" +
 	"\rauthenticated\x18\x01 \x01(\bR\rauthenticated\x12&\n" +
 	"\x06claims\x18\x02 \x01(\v2\x0e.plugin.ClaimsR\x06claims\x12&\n" +
@@ -4945,7 +4967,8 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"\x06scopes\x18\t \x03(\tR\x06scopes\x12\x16\n" +
 	"\x06reason\x18\n" +
 	" \x01(\tR\x06reason\x12\x12\n" +
-	"\x04flow\x18\v \x01(\tR\x04flow\"\xb5\x02\n" +
+	"\x04flow\x18\v \x01(\tR\x04flow\x12\x1a\n" +
+	"\bhostname\x18\f \x01(\tR\bhostname\"\xb5\x02\n" +
 	"\x0fGetTokenRequest\x12!\n" +
 	"\fhandler_name\x18\x01 \x01(\tR\vhandlerName\x12\x14\n" +
 	"\x05scope\x18\x02 \x01(\tR\x05scope\x121\n" +
@@ -4970,7 +4993,7 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"\fhandler_name\x18\x01 \x01(\tR\vhandlerName\x12\x18\n" +
 	"\aprofile\x18\x02 \x01(\tR\aprofile\"K\n" +
 	"\x18ListCachedTokensResponse\x12/\n" +
-	"\x06tokens\x18\x01 \x03(\v2\x17.plugin.CachedTokenInfoR\x06tokens\"\xc1\x02\n" +
+	"\x06tokens\x18\x01 \x03(\v2\x17.plugin.CachedTokenInfoR\x06tokens\"\xdd\x02\n" +
 	"\x0fCachedTokenInfo\x12\x18\n" +
 	"\ahandler\x18\x01 \x01(\tR\ahandler\x12\x1d\n" +
 	"\n" +
@@ -4986,7 +5009,8 @@ const file_plugin_proto_plugin_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\t \x01(\tR\tsessionId\x12 \n" +
 	"\vfingerprint\x18\n" +
-	" \x01(\tR\vfingerprint\"X\n" +
+	" \x01(\tR\vfingerprint\x12\x1a\n" +
+	"\bhostname\x18\v \x01(\tR\bhostname\"X\n" +
 	"\x19PurgeExpiredTokensRequest\x12!\n" +
 	"\fhandler_name\x18\x01 \x01(\tR\vhandlerName\x12\x18\n" +
 	"\aprofile\x18\x02 \x01(\tR\aprofile\"?\n" +
