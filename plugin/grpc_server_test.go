@@ -7,7 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
+	"sync"
 	"testing"
 
 	"github.com/Masterminds/semver/v3"
@@ -183,6 +185,164 @@ func TestGRPCServer_ExecuteProvider_ImplError(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "exec failed", resp.Error)
+}
+
+func TestGRPCServer_ExecuteProvider_Settings(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure map[string][]byte
+		execute   map[string][]byte
+		wantOK    bool
+		want      map[string]string
+	}{
+		{
+			name:   "none",
+			wantOK: false,
+		},
+		{
+			name:      "configure only",
+			configure: map[string][]byte{"host": []byte(`"cfg.example.com"`)},
+			wantOK:    true,
+			want:      map[string]string{"host": `"cfg.example.com"`},
+		},
+		{
+			name:    "execute only",
+			execute: map[string][]byte{"host": []byte(`"exec.example.com"`)},
+			wantOK:  true,
+			want:    map[string]string{"host": `"exec.example.com"`},
+		},
+		{
+			name:      "execute overrides configure and merges",
+			configure: map[string][]byte{"host": []byte(`"cfg.example.com"`), "port": []byte(`80`)},
+			execute:   map[string][]byte{"host": []byte(`"exec.example.com"`)},
+			wantOK:    true,
+			want:      map[string]string{"host": `"exec.example.com"`, "port": `80`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotSettings map[string]json.RawMessage
+			var gotOK bool
+			srv := &GRPCServer{Impl: &mockProvider{
+				executeProvider: func(ctx context.Context, _ string, _ map[string]any) (*provider.Output, error) {
+					gotSettings, gotOK = provider.SettingsFromContext(ctx)
+					return &provider.Output{Data: map[string]any{}}, nil
+				},
+			}}
+
+			if tt.configure != nil {
+				_, err := srv.ConfigureProvider(context.Background(), &proto.ConfigureProviderRequest{
+					ProviderName: "test", Settings: tt.configure,
+				})
+				require.NoError(t, err)
+			}
+
+			inputJSON, _ := json.Marshal(map[string]any{})
+			resp, err := srv.ExecuteProvider(context.Background(), &proto.ExecuteProviderRequest{
+				ProviderName: "test", Input: inputJSON, Settings: tt.execute,
+			})
+			require.NoError(t, err)
+			assert.Empty(t, resp.Error)
+
+			assert.Equal(t, tt.wantOK, gotOK)
+			if !tt.wantOK {
+				assert.Nil(t, gotSettings)
+				return
+			}
+			require.Len(t, gotSettings, len(tt.want))
+			for k, want := range tt.want {
+				assert.JSONEq(t, want, string(gotSettings[k]))
+			}
+		})
+	}
+}
+
+// TestGRPCServer_ExecuteProvider_Settings_NoMutation verifies that merging
+// execute-time settings never mutates the stored configure-time settings, so a
+// later execution with different execute settings sees a clean base.
+func TestGRPCServer_ExecuteProvider_Settings_NoMutation(t *testing.T) {
+	var lastSettings map[string]json.RawMessage
+	srv := &GRPCServer{Impl: &mockProvider{
+		executeProvider: func(ctx context.Context, _ string, _ map[string]any) (*provider.Output, error) {
+			lastSettings, _ = provider.SettingsFromContext(ctx)
+			return &provider.Output{Data: map[string]any{}}, nil
+		},
+	}}
+	_, err := srv.ConfigureProvider(context.Background(), &proto.ConfigureProviderRequest{
+		ProviderName: "test", Settings: map[string][]byte{"base": []byte(`"static"`)},
+	})
+	require.NoError(t, err)
+
+	inputJSON, _ := json.Marshal(map[string]any{})
+
+	// First execution adds an execute-only key.
+	_, err = srv.ExecuteProvider(context.Background(), &proto.ExecuteProviderRequest{
+		ProviderName: "test", Input: inputJSON, Settings: map[string][]byte{"extra": []byte(`"one"`)},
+	})
+	require.NoError(t, err)
+	assert.Len(t, lastSettings, 2)
+
+	// Second execution with no execute settings must only see the configure base.
+	_, err = srv.ExecuteProvider(context.Background(), &proto.ExecuteProviderRequest{
+		ProviderName: "test", Input: inputJSON,
+	})
+	require.NoError(t, err)
+	require.Len(t, lastSettings, 1)
+	assert.JSONEq(t, `"static"`, string(lastSettings["base"]))
+}
+
+// TestGRPCServer_ExecuteProvider_Settings_Parallel exercises concurrent
+// executions to confirm the per-call merge is race-free (run with -race).
+func TestGRPCServer_ExecuteProvider_Settings_Parallel(t *testing.T) {
+	srv := &GRPCServer{Impl: &mockProvider{
+		executeProvider: func(ctx context.Context, _ string, _ map[string]any) (*provider.Output, error) {
+			_, _ = provider.SettingsFromContext(ctx)
+			return &provider.Output{Data: map[string]any{}}, nil
+		},
+	}}
+	_, err := srv.ConfigureProvider(context.Background(), &proto.ConfigureProviderRequest{
+		ProviderName: "test", Settings: map[string][]byte{"base": []byte(`"static"`)},
+	})
+	require.NoError(t, err)
+
+	inputJSON, _ := json.Marshal(map[string]any{})
+	var wg sync.WaitGroup
+	for i := 0; i < 25; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			key := fmt.Sprintf(`"exec-%d"`, n)
+			_, err := srv.ExecuteProvider(context.Background(), &proto.ExecuteProviderRequest{
+				ProviderName: "test", Input: inputJSON,
+				Settings: map[string][]byte{"dynamic": []byte(key)},
+			})
+			assert.NoError(t, err)
+		}(i)
+	}
+	wg.Wait()
+}
+
+// TestGRPCServer_ExecuteProvider_SolutionSource verifies the solution source
+// flows from the request metadata into the provider context.
+func TestGRPCServer_ExecuteProvider_SolutionSource(t *testing.T) {
+	var gotSource string
+	srv := &GRPCServer{Impl: &mockProvider{
+		executeProvider: func(ctx context.Context, _ string, _ map[string]any) (*provider.Output, error) {
+			if meta, ok := provider.SolutionMetadataFromContext(ctx); ok {
+				gotSource = meta.Source
+			}
+			return &provider.Output{Data: map[string]any{}}, nil
+		},
+	}}
+	inputJSON, _ := json.Marshal(map[string]any{})
+	resp, err := srv.ExecuteProvider(context.Background(), &proto.ExecuteProviderRequest{
+		ProviderName: "test", Input: inputJSON,
+		SolutionMetadata: &proto.SolutionMeta{Name: "sol", Source: "./solution.yaml"},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, resp.Error)
+	assert.Equal(t, "./solution.yaml", gotSource)
 }
 
 func TestGRPCServer_ConfigureProvider(t *testing.T) {

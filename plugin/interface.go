@@ -181,7 +181,11 @@ var handshakeConfig = HandshakeConfigData{
 }
 
 // PluginProtocolVersion is the current plugin protocol version.
-const PluginProtocolVersion int32 = 2
+//
+// Version 3 adds per-execution provider settings (ExecuteProviderRequest.settings)
+// and SolutionMeta.source. The changes are additive and backward compatible with
+// version 2 hosts, which simply omit the new fields.
+const PluginProtocolVersion int32 = 3
 
 // AuthHandlerPluginProtocolVersion is the current auth handler plugin protocol version.
 const AuthHandlerPluginProtocolVersion int32 = 2

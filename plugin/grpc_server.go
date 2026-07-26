@@ -30,6 +30,11 @@ type GRPCServer struct {
 	mu         sync.RWMutex
 	conn       *grpc.ClientConn
 	hostClient *HostServiceClient
+	// configureSettings holds the settings captured from ConfigureProvider,
+	// keyed by provider name (last write wins). Read on every ExecuteProvider,
+	// which merges execute-time settings over these to form the effective
+	// per-execution settings.
+	configureSettings map[string]map[string]json.RawMessage
 	// dialFunc overrides broker.Dial; set in tests to avoid a real GRPCBroker.
 	dialFunc func(id uint32) (*grpc.ClientConn, error)
 }
@@ -62,6 +67,7 @@ func (s *GRPCServer) ExecuteProvider(ctx context.Context, req *proto.ExecuteProv
 	if ctxErr != nil {
 		return &proto.ExecuteProviderResponse{Error: ctxErr.Error()}, nil //nolint:nilerr
 	}
+	ctx = s.withSettings(ctx, req.ProviderName, req.Settings)
 	ctx = s.injectHostClient(ctx)
 	output, err := s.Impl.ExecuteProvider(ctx, req.ProviderName, input)
 	if err != nil {
@@ -79,6 +85,12 @@ func (s *GRPCServer) ConfigureProvider(ctx context.Context, req *proto.Configure
 	for k, v := range req.Settings {
 		settings[k] = json.RawMessage(v)
 	}
+	s.mu.Lock()
+	if s.configureSettings == nil {
+		s.configureSettings = make(map[string]map[string]json.RawMessage)
+	}
+	s.configureSettings[req.ProviderName] = settings
+	s.mu.Unlock()
 	cfg := ProviderConfig{
 		Quiet:         req.Quiet,
 		NoColor:       req.NoColor,
@@ -131,6 +143,7 @@ func (s *GRPCServer) ExecuteProviderStream(req *proto.ExecuteProviderRequest, st
 			},
 		})
 	}
+	ctx = s.withSettings(ctx, req.ProviderName, req.Settings)
 	ctx = s.injectHostClient(ctx)
 	forwarder := newStreamForwarder(stream)
 	err := s.Impl.ExecuteProviderStream(ctx, req.ProviderName, input, forwarder.forward)
@@ -205,6 +218,28 @@ func (s *GRPCServer) injectHostClient(ctx context.Context) context.Context {
 	return ctx
 }
 
+// withSettings injects the effective per-execution settings into the context.
+// It merges the execute-time settings from the request over the configure-time
+// settings captured for the provider. A new map is built per call so concurrent
+// executions never share mutable state. When neither side has values the context
+// is returned unchanged.
+func (s *GRPCServer) withSettings(ctx context.Context, providerName string, execute map[string][]byte) context.Context {
+	s.mu.RLock()
+	configure := s.configureSettings[providerName]
+	s.mu.RUnlock()
+	if len(configure) == 0 && len(execute) == 0 {
+		return ctx
+	}
+	merged := make(map[string]json.RawMessage, len(configure)+len(execute))
+	for k, v := range configure {
+		merged[k] = v
+	}
+	for k, v := range execute {
+		merged[k] = json.RawMessage(v)
+	}
+	return provider.WithSettings(ctx, merged)
+}
+
 // pickDialFunc returns the effective dial function: the test override if set,
 // otherwise broker.Dial, or nil if neither is available.
 func (s *GRPCServer) pickDialFunc() func(id uint32) (*grpc.ClientConn, error) {
@@ -239,6 +274,7 @@ func unmarshalSolutionMeta(ctx context.Context, meta *proto.SolutionMeta) contex
 	return provider.WithSolutionMetadata(ctx, &provider.SolutionMeta{
 		Name: meta.Name, Version: meta.Version, DisplayName: meta.DisplayName,
 		Description: meta.Description, Category: meta.Category, Tags: meta.Tags,
+		Source: meta.Source,
 	})
 }
 
