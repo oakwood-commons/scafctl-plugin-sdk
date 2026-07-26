@@ -292,6 +292,45 @@ func TestGRPCServer_ExecuteProvider_Settings_NoMutation(t *testing.T) {
 	assert.JSONEq(t, `"static"`, string(lastSettings["base"]))
 }
 
+// TestGRPCServer_ConfigureProvider_SettingsIsolated verifies that the settings
+// stored for later executions are decoupled from the cfg.Settings map handed to
+// the plugin, so plugin-side mutation cannot corrupt or race server-side state.
+func TestGRPCServer_ConfigureProvider_SettingsIsolated(t *testing.T) {
+	var pluginSettings map[string]json.RawMessage
+	var mergedSettings map[string]json.RawMessage
+	srv := &GRPCServer{Impl: &mockProvider{
+		configureProvider: func(_ context.Context, _ string, cfg ProviderConfig) error {
+			pluginSettings = cfg.Settings
+			return nil
+		},
+		executeProvider: func(ctx context.Context, _ string, _ map[string]any) (*provider.Output, error) {
+			mergedSettings, _ = provider.SettingsFromContext(ctx)
+			return &provider.Output{Data: map[string]any{}}, nil
+		},
+	}}
+	_, err := srv.ConfigureProvider(context.Background(), &proto.ConfigureProviderRequest{
+		ProviderName: "test", Settings: map[string][]byte{"base": []byte(`"static"`)},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, pluginSettings)
+
+	// A misbehaving plugin mutates the map it received.
+	pluginSettings["injected"] = json.RawMessage(`"tampered"`)
+	delete(pluginSettings, "base")
+
+	inputJSON, _ := json.Marshal(map[string]any{})
+	_, err = srv.ExecuteProvider(context.Background(), &proto.ExecuteProviderRequest{
+		ProviderName: "test", Input: inputJSON,
+	})
+	require.NoError(t, err)
+
+	// The stored/merged settings must be unaffected by the plugin's mutation.
+	require.Len(t, mergedSettings, 1)
+	assert.JSONEq(t, `"static"`, string(mergedSettings["base"]))
+	_, injected := mergedSettings["injected"]
+	assert.False(t, injected)
+}
+
 // TestGRPCServer_ExecuteProvider_Settings_Parallel exercises concurrent
 // executions to confirm the per-call merge is race-free (run with -race).
 func TestGRPCServer_ExecuteProvider_Settings_Parallel(t *testing.T) {

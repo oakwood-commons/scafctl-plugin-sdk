@@ -85,11 +85,18 @@ func (s *GRPCServer) ConfigureProvider(ctx context.Context, req *proto.Configure
 	for k, v := range req.Settings {
 		settings[k] = json.RawMessage(v)
 	}
+	// Store an independent copy so a plugin that retains and mutates
+	// cfg.Settings cannot race the server's reads of configureSettings in
+	// withSettings (which ranges over the stored map on every execution).
+	stored := make(map[string]json.RawMessage, len(settings))
+	for k, v := range settings {
+		stored[k] = v
+	}
 	s.mu.Lock()
 	if s.configureSettings == nil {
 		s.configureSettings = make(map[string]map[string]json.RawMessage)
 	}
-	s.configureSettings[req.ProviderName] = settings
+	s.configureSettings[req.ProviderName] = stored
 	s.mu.Unlock()
 	cfg := ProviderConfig{
 		Quiet:         req.Quiet,
