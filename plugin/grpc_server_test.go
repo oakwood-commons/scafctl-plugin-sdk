@@ -331,6 +331,43 @@ func TestGRPCServer_ConfigureProvider_SettingsIsolated(t *testing.T) {
 	assert.False(t, injected)
 }
 
+// TestGRPCServer_ExecuteProvider_Settings_ByteIsolation verifies that mutating
+// the underlying bytes of the settings exposed via the context does not corrupt
+// the stored configure-time base seen by a later execution.
+func TestGRPCServer_ExecuteProvider_Settings_ByteIsolation(t *testing.T) {
+	var seen map[string]json.RawMessage
+	srv := &GRPCServer{Impl: &mockProvider{
+		executeProvider: func(ctx context.Context, _ string, _ map[string]any) (*provider.Output, error) {
+			seen, _ = provider.SettingsFromContext(ctx)
+			return &provider.Output{Data: map[string]any{}}, nil
+		},
+	}}
+	_, err := srv.ConfigureProvider(context.Background(), &proto.ConfigureProviderRequest{
+		ProviderName: "test", Settings: map[string][]byte{"base": []byte(`"static"`)},
+	})
+	require.NoError(t, err)
+
+	inputJSON, _ := json.Marshal(map[string]any{})
+
+	// First execution mutates the bytes it received in place.
+	_, err = srv.ExecuteProvider(context.Background(), &proto.ExecuteProviderRequest{
+		ProviderName: "test", Input: inputJSON,
+	})
+	require.NoError(t, err)
+	require.Len(t, seen, 1)
+	for i := range seen["base"] {
+		seen["base"][i] = 'X'
+	}
+
+	// Second execution must still observe the pristine configure-time base.
+	_, err = srv.ExecuteProvider(context.Background(), &proto.ExecuteProviderRequest{
+		ProviderName: "test", Input: inputJSON,
+	})
+	require.NoError(t, err)
+	require.Len(t, seen, 1)
+	assert.JSONEq(t, `"static"`, string(seen["base"]))
+}
+
 // TestGRPCServer_ExecuteProvider_Settings_Parallel exercises concurrent
 // executions to confirm the per-call merge is race-free (run with -race).
 func TestGRPCServer_ExecuteProvider_Settings_Parallel(t *testing.T) {

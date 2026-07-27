@@ -4,6 +4,7 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -227,9 +228,11 @@ func (s *GRPCServer) injectHostClient(ctx context.Context) context.Context {
 
 // withSettings injects the effective per-execution settings into the context.
 // It merges the execute-time settings from the request over the configure-time
-// settings captured for the provider. A new map is built per call so concurrent
-// executions never share mutable state. When neither side has values the context
-// is returned unchanged.
+// settings captured for the provider. A new map with independently copied byte
+// slices is built per call so concurrent executions never share mutable state
+// and a plugin mutating its per-call settings cannot corrupt the stored
+// configure-time base. When neither side has values the context is returned
+// unchanged.
 func (s *GRPCServer) withSettings(ctx context.Context, providerName string, execute map[string][]byte) context.Context {
 	s.mu.RLock()
 	configure := s.configureSettings[providerName]
@@ -239,10 +242,10 @@ func (s *GRPCServer) withSettings(ctx context.Context, providerName string, exec
 	}
 	merged := make(map[string]json.RawMessage, len(configure)+len(execute))
 	for k, v := range configure {
-		merged[k] = v
+		merged[k] = bytes.Clone(v)
 	}
 	for k, v := range execute {
-		merged[k] = json.RawMessage(v)
+		merged[k] = json.RawMessage(bytes.Clone(v))
 	}
 	return provider.WithSettings(ctx, merged)
 }
