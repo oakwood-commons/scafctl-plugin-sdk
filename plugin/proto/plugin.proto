@@ -230,6 +230,12 @@ message ExecuteProviderRequest {
   bytes parameters = 11;
   SolutionMeta solution_metadata = 12;
   string auth_profile = 13;
+  // settings carries the full effective per-execution host settings. It
+  // mirrors ConfigureProviderRequest.settings but is delivered per execution so
+  // pooled (long-lived) hosts can supply per-solution values that cannot be sent
+  // through the one-time ConfigureProvider RPC. The SDK merges these over the
+  // configure-time settings. Additive: older hosts omit it.
+  map<string, bytes> settings = 14;
 }
 
 message ConfigureProviderRequest {
@@ -256,6 +262,9 @@ message SolutionMeta {
   string description = 4;
   string category = 5;
   repeated string tags = 6;
+  // source identifies where the solution was loaded from (e.g. a file path,
+  // catalog reference, or URL). Additive so pool-mode and per-call outputs match.
+  string source = 7;
 }
 
 message IterationContext {

@@ -861,7 +861,7 @@ func TestAuthHandlerHandshakeConfig(t *testing.T) {
 }
 
 func TestPluginProtocolVersion(t *testing.T) {
-	assert.Equal(t, int32(2), PluginProtocolVersion)
+	assert.Equal(t, int32(3), PluginProtocolVersion)
 }
 
 func TestAuthHandlerPluginProtocolVersion(t *testing.T) {

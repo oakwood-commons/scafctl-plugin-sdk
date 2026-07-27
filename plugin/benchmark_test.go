@@ -248,6 +248,27 @@ func BenchmarkGRPCServer_ConfigureProvider(b *testing.B) {
 	}
 }
 
+// BenchmarkGRPCServer_ExecuteProviderWithSettings measures the per-execution
+// settings merge (configure-time base overlaid with execute-time values).
+func BenchmarkGRPCServer_ExecuteProviderWithSettings(b *testing.B) {
+	srv := &GRPCServer{Impl: &benchMockProvider{}}
+	_, _ = srv.ConfigureProvider(context.Background(), &proto.ConfigureProviderRequest{
+		ProviderName: "bench",
+		Settings:     map[string][]byte{"host": []byte(`"cfg.example.com"`), "port": []byte(`80`)},
+	})
+	inputJSON, _ := json.Marshal(map[string]any{"message": "hello"})
+	req := &proto.ExecuteProviderRequest{
+		ProviderName: "bench", Input: inputJSON,
+		Settings: map[string][]byte{"host": []byte(`"exec.example.com"`)},
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_, _ = srv.ExecuteProvider(context.Background(), req)
+	}
+}
+
 // benchMockProvider is a minimal provider mock for benchmarks.
 type benchMockProvider struct{}
 

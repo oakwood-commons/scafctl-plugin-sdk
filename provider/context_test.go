@@ -6,6 +6,7 @@ package provider
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -104,6 +105,7 @@ func TestWithSolutionMetadata(t *testing.T) {
 	sm := &SolutionMeta{
 		Name: "test-sol", Version: "1.0.0", DisplayName: "Test",
 		Description: "A test solution", Category: "infra", Tags: []string{"tag1"},
+		Source: "./solution.yaml",
 	}
 	ctx = WithSolutionMetadata(ctx, sm)
 	meta, ok = SolutionMetadataFromContext(ctx)
@@ -112,6 +114,25 @@ func TestWithSolutionMetadata(t *testing.T) {
 	assert.Equal(t, "test-sol", meta.Name)
 	assert.Equal(t, "1.0.0", meta.Version)
 	assert.Equal(t, []string{"tag1"}, meta.Tags)
+	assert.Equal(t, "./solution.yaml", meta.Source)
+}
+
+func TestWithSettings(t *testing.T) {
+	ctx := context.Background()
+	settings, ok := SettingsFromContext(ctx)
+	assert.False(t, ok)
+	assert.Nil(t, settings)
+
+	in := map[string]json.RawMessage{
+		"host":    json.RawMessage(`"example.com"`),
+		"timeout": json.RawMessage(`30`),
+	}
+	ctx = WithSettings(ctx, in)
+	got, ok := SettingsFromContext(ctx)
+	assert.True(t, ok)
+	require.NotNil(t, got)
+	assert.JSONEq(t, `"example.com"`, string(got["host"]))
+	assert.JSONEq(t, `30`, string(got["timeout"]))
 }
 
 func TestWithOutputDirectory(t *testing.T) {

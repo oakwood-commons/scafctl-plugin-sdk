@@ -5,6 +5,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 )
 
@@ -24,6 +25,7 @@ const (
 
 	conflictStrategyKey contextKey = "scafctl.provider.conflictStrategy"
 	backupKey           contextKey = "scafctl.provider.backup"
+	settingsKey         contextKey = "scafctl.provider.settings"
 )
 
 // SolutionMeta holds solution metadata fields made available to providers via context.
@@ -41,6 +43,9 @@ type SolutionMeta struct {
 	Category string `json:"category,omitempty" yaml:"category,omitempty" doc:"The category of the solution" maxLength:"128" example:"infrastructure"`
 	// Tags are searchable keywords associated with the solution.
 	Tags []string `json:"tags,omitempty" yaml:"tags,omitempty" doc:"A list of tags for the solution" maxItems:"50"`
+	// Source identifies where the solution was loaded from (e.g. a file path,
+	// catalog reference, or URL).
+	Source string `json:"source,omitempty" yaml:"source,omitempty" doc:"The source location of the solution" maxLength:"2048" example:"./solution.yaml"`
 }
 
 // WithSolutionMetadata returns a new context with the solution metadata attached.
@@ -53,6 +58,24 @@ func WithSolutionMetadata(ctx context.Context, meta *SolutionMeta) context.Conte
 func SolutionMetadataFromContext(ctx context.Context) (*SolutionMeta, bool) {
 	meta, ok := ctx.Value(solutionMetadataKey).(*SolutionMeta)
 	return meta, ok
+}
+
+// WithSettings returns a new context carrying the effective per-execution host
+// settings for this ExecuteProvider call. The SDK server populates this with the
+// merge of configure-time settings and any execute-time settings sent by the
+// host, so plugins can read a single source regardless of host mode.
+func WithSettings(ctx context.Context, settings map[string]json.RawMessage) context.Context {
+	return context.WithValue(ctx, settingsKey, settings)
+}
+
+// SettingsFromContext retrieves the effective per-execution host settings from
+// the context. Returns the settings map and true if present, nil and false
+// otherwise. When absent (e.g. an older host), plugins should fall back to the
+// settings received via ConfigureProvider. The returned map and its values must
+// be treated as read-only; the underlying bytes may be shared across executions.
+func SettingsFromContext(ctx context.Context) (map[string]json.RawMessage, bool) {
+	settings, ok := ctx.Value(settingsKey).(map[string]json.RawMessage)
+	return settings, ok
 }
 
 // WithOutputDirectory returns a new context with the output directory path attached.
