@@ -36,4 +36,4 @@ jobs:
       - name: Build
         run: go build ./...
 
-      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4 (codeql-bundle-v2.25.0)
+      - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4 (codeql-bundle-v2.25.0)
