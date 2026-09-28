@@ -25,6 +25,31 @@ type ProviderConfig struct {
 	HostServiceID uint32                     `json:"hostServiceId,omitempty" yaml:"hostServiceId,omitempty"`
 	Profile       string                     `json:"profile,omitempty" yaml:"profile,omitempty"`
 	Settings      map[string]json.RawMessage `json:"settings,omitempty" yaml:"settings,omitempty"`
+	// HostCapabilities advertises optional host features. Only the auth
+	// handler configure path populates it (ConfigureAuthHandlerRequest);
+	// nil when the host did not advertise any.
+	HostCapabilities *HostCapabilities `json:"hostCapabilities,omitempty" yaml:"hostCapabilities,omitempty"`
+}
+
+// HostCapabilities lists optional host features, advertised to auth handler
+// plugins at configure time so handlers can consult them before
+// DetectAvailableFlows or Login.
+type HostCapabilities struct {
+	// PromptAuthResponse indicates the host implements the
+	// HostService.PromptAuthResponse callback: during an interactive Login
+	// it can display the authorization URL and collect the pasted redirect
+	// URL from the user. Handlers may use this to rank interactive flows
+	// (authorization code + PKCE) ahead of device code in sessions where
+	// the browser redirect cannot reach this machine.
+	PromptAuthResponse bool `json:"promptAuthResponse,omitempty" yaml:"promptAuthResponse,omitempty"`
+}
+
+// SupportsPromptAuthResponse reports whether the host advertised support for
+// the PromptAuthResponse host callback. It consults capabilities received at
+// configure time, before DetectAvailableFlows, and is nil-safe: always false
+// for older hosts that did not advertise capabilities.
+func (c ProviderConfig) SupportsPromptAuthResponse() bool {
+	return c.HostCapabilities != nil && c.HostCapabilities.PromptAuthResponse
 }
 
 // StreamChunk represents one chunk from a streaming provider execution.

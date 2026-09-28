@@ -166,7 +166,7 @@ func (s *AuthHandlerGRPCServer) ConfigureAuthHandler(ctx context.Context, req *p
 	for k, v := range req.Settings {
 		settings[k] = json.RawMessage(v)
 	}
-	cfg := ProviderConfig{Quiet: req.Quiet, NoColor: req.NoColor, BinaryName: req.BinaryName, Profile: req.Profile, Settings: settings, HostServiceID: req.HostServiceId}
+	cfg := ProviderConfig{Quiet: req.Quiet, NoColor: req.NoColor, BinaryName: req.BinaryName, Profile: req.Profile, Settings: settings, HostServiceID: req.HostServiceId, HostCapabilities: hostCapabilitiesFromProto(req.HostCapabilities)}
 	// Dial the host's HostService broker if an ID was provided and a dial
 	// function is available. When no broker or dialFunc is set (e.g. in tests),
 	// this is a no-op.
@@ -295,6 +295,13 @@ func (s *AuthHandlerGRPCServer) ActivateServerMode(ctx context.Context, req *pro
 }
 
 // ---- Conversion helpers ----
+
+func hostCapabilitiesFromProto(hc *proto.HostCapabilities) *HostCapabilities {
+	if hc == nil {
+		return nil
+	}
+	return &HostCapabilities{PromptAuthResponse: hc.PromptAuthResponse}
+}
 
 func claimsToProto(c *auth.Claims) *proto.Claims {
 	if c == nil {
