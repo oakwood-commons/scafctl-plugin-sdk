@@ -391,6 +391,59 @@ func TestAuthGRPCServer_ConfigureAuthHandler_NoBroker(t *testing.T) {
 	assert.Equal(t, uint32(42), gotCfg.HostServiceID)
 }
 
+func TestAuthGRPCServer_ConfigureAuthHandler_HostCapabilities(t *testing.T) {
+	tests := []struct {
+		name string
+		caps *proto.HostCapabilities
+		// wantAdvertised is the expected SupportsPromptAuthResponse value the
+		// handler sees; wantNil is whether cfg.HostCapabilities stays nil.
+		wantAdvertised bool
+		wantNil        bool
+	}{
+		{
+			name:           "host advertises prompt auth response",
+			caps:           &proto.HostCapabilities{PromptAuthResponse: true},
+			wantAdvertised: true,
+		},
+		{
+			name:           "host advertises empty capabilities",
+			caps:           &proto.HostCapabilities{},
+			wantAdvertised: false,
+		},
+		{
+			name:           "older host omits capabilities",
+			caps:           nil,
+			wantAdvertised: false,
+			wantNil:        true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotCfg ProviderConfig
+			srv := &AuthHandlerGRPCServer{
+				Impl: &mockAuthHandler{
+					configureAuthHandler: func(_ context.Context, _ string, cfg ProviderConfig) error {
+						gotCfg = cfg
+						return nil
+					},
+				},
+			}
+			resp, err := srv.ConfigureAuthHandler(context.Background(), &proto.ConfigureAuthHandlerRequest{
+				HandlerName: "entra", Profile: "corp", HostCapabilities: tt.caps,
+			})
+			require.NoError(t, err)
+			assert.Empty(t, resp.Error)
+			if tt.wantNil {
+				assert.Nil(t, gotCfg.HostCapabilities)
+			} else {
+				require.NotNil(t, gotCfg.HostCapabilities)
+			}
+			assert.Equal(t, tt.wantAdvertised, gotCfg.SupportsPromptAuthResponse(),
+				"capability must be consultable before DetectAvailableFlows")
+		})
+	}
+}
+
 func TestAuthGRPCServer_StopAuthHandler_ClosesConn(t *testing.T) {
 	conn, cleanup := startFakeHostService(t)
 	defer cleanup()

@@ -65,6 +65,27 @@ service HostService {
   // and no application error, rather than surfacing a gRPC Unimplemented
   // error.
   rpc GetAuthGroups(GetAuthGroupsRequest) returns (GetAuthGroupsResponse);
+
+  // PromptAuthResponse asks the host to prompt the user for the redirect URL
+  // produced by an authorization code + PKCE login, and returns the pasted
+  // URL. In remote sessions (DevSpaces, Codespaces) the browser runs on the
+  // user's machine while the plugin runs elsewhere, so the OAuth redirect
+  // cannot reach the plugin's loopback listener; the user instead pastes the
+  // URL they landed on.
+  //
+  // Contract:
+  //   - The host writes the prompt text itself: it displays
+  //     authorization_url, asks the user to paste the redirect URL they
+  //     ended up on, and checks the paste against redirect_uri (the expected
+  //     URL prefix).
+  //   - The call is valid only during an active Login for that handler;
+  //     outside a Login the host returns Unavailable.
+  //   - The host never logs the returned value (it carries an
+  //     authorization code).
+  //   - A non-interactive host returns Unavailable; user cancellation
+  //     surfaces as Canceled; hosts that predate this RPC return
+  //     Unimplemented from gRPC itself.
+  rpc PromptAuthResponse(PromptAuthResponseRequest) returns (PromptAuthResponseResponse);
 }
 
 // AuthHandlerService is the auth handler plugin service.
@@ -500,12 +521,30 @@ message ConfigureAuthHandlerRequest {
   uint32 host_service_id = 6;
   int32  protocol_version = 7;
   string profile = 8;
+  // host_capabilities advertises optional host features to the plugin at
+  // configure time, before the host calls DetectAvailableFlows or Login. The
+  // plugin cannot probe these itself (a PromptAuthResponse probe would
+  // prompt the user), so the host states its support here once. Additive:
+  // older hosts omit the field.
+  HostCapabilities host_capabilities = 9;
 }
 
 message ConfigureAuthHandlerResponse {
   string error = 1;
   int32  protocol_version = 2;
   repeated Diagnostic diagnostics = 3;
+}
+
+// HostCapabilities lists optional host features, advertised to auth handler
+// plugins at configure time via ConfigureAuthHandlerRequest. Plugins consult
+// it before DetectAvailableFlows to rank flows for the session.
+message HostCapabilities {
+  // prompt_auth_response: the host implements HostService.PromptAuthResponse
+  // and can collect a pasted OAuth redirect URL from the user during Login.
+  // Handlers may use this to rank interactive flows (authorization code +
+  // PKCE) ahead of device code in sessions where the browser redirect cannot
+  // reach this machine.
+  bool prompt_auth_response = 1;
 }
 
 message StopAuthHandlerRequest {
@@ -612,4 +651,23 @@ message GetAuthGroupsResponse {
   // duplicates should not be returned.
   repeated string groups = 1;
   string error = 2;
+}
+
+message PromptAuthResponseRequest {
+  // handler_name names the auth handler whose Login is in progress; the call
+  // is valid only during an active Login for that handler.
+  string handler_name = 1;
+  // authorization_url is displayed to the user so they can open the login
+  // page and complete the sign-in.
+  string authorization_url = 2;
+  // redirect_uri is the expected redirect URL prefix (e.g.
+  // "http://localhost:8400/callback"); the host checks the pasted value
+  // against this shape before returning it.
+  string redirect_uri = 3;
+}
+
+message PromptAuthResponseResponse {
+  // value is the redirect URL pasted by the user, verbatim. The host never
+  // logs it (it carries an authorization code).
+  string value = 1;
 }

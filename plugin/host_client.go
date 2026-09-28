@@ -5,6 +5,7 @@ package plugin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/oakwood-commons/scafctl-plugin-sdk/auth"
@@ -135,4 +136,47 @@ func (c *HostServiceClient) GetAuthGroups(ctx context.Context, handler string) (
 		return []string{}, nil
 	}
 	return resp.Groups, nil
+}
+
+// PromptAuthResponse asks the host to prompt the user for the redirect URL
+// produced by an authorization code + PKCE login and returns the pasted
+// value. In remote sessions (DevSpaces, Codespaces) the browser redirect
+// cannot reach the machine running the plugin; the user pastes the URL they
+// landed on instead, and the host captures it via this call.
+//
+// Call it only during an active Login for handler: the host renders the
+// prompt text itself (displaying authURL), checks the paste against
+// redirectURI (the expected URL prefix), and never logs the returned value.
+//
+// Error cases: a non-interactive host returns gRPC Unavailable; user
+// cancellation surfaces as Canceled; older hosts return Unimplemented, which
+// callers can detect with IsUnimplemented and fall back to another flow.
+func (c *HostServiceClient) PromptAuthResponse(ctx context.Context, handler, authURL, redirectURI string) (string, error) {
+	resp, err := c.client.PromptAuthResponse(ctx, &proto.PromptAuthResponseRequest{
+		HandlerName:      handler,
+		AuthorizationUrl: authURL,
+		RedirectUri:      redirectURI,
+	})
+	if err != nil {
+		return "", fmt.Errorf("host PromptAuthResponse: %w", err)
+	}
+	return resp.Value, nil
+}
+
+// IsUnimplemented reports whether err is or wraps a gRPC Unimplemented error,
+// as gRPC itself returns from older hosts that do not implement a
+// HostService RPC. Use it to detect whether PromptAuthResponse (and other
+// newer host calls) is available, e.g. to fall back to another flow:
+//
+//	if _, err := hc.PromptAuthResponse(ctx, ...); err != nil && plugin.IsUnimplemented(err) {
+//		// older host: fall back to device code
+//	}
+func IsUnimplemented(err error) bool {
+	for err != nil {
+		if s, ok := status.FromError(err); ok && s.Code() == codes.Unimplemented {
+			return true
+		}
+		err = errors.Unwrap(err)
+	}
+	return false
 }

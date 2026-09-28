@@ -5,6 +5,8 @@ package plugin
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"testing"
 
@@ -13,13 +15,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 // fakeHostService is a minimal in-process HostService for testing.
 type fakeHostService struct {
 	proto.UnimplementedHostServiceServer
 	lastAuthTokenProfile string // captured from GetAuthToken requests
+	promptAuthErr        error  // when set, PromptAuthResponse returns this gRPC error
+	lastPromptReq        *proto.PromptAuthResponseRequest
 }
 
 func (f *fakeHostService) GetSecret(_ context.Context, req *proto.GetSecretRequest) (*proto.GetSecretResponse, error) {
@@ -77,6 +83,19 @@ func (f *fakeHostService) GetAuthGroups(_ context.Context, req *proto.GetAuthGro
 		return &proto.GetAuthGroupsResponse{Error: "groups error"}, nil
 	}
 	return &proto.GetAuthGroupsResponse{Groups: []string{"group-a", "group-b"}}, nil
+}
+
+func (f *fakeHostService) PromptAuthResponse(_ context.Context, req *proto.PromptAuthResponseRequest) (*proto.PromptAuthResponseResponse, error) {
+	reqClone := proto.PromptAuthResponseRequest{
+		HandlerName:      req.HandlerName,
+		AuthorizationUrl: req.AuthorizationUrl,
+		RedirectUri:      req.RedirectUri,
+	}
+	f.lastPromptReq = &reqClone
+	if f.promptAuthErr != nil {
+		return nil, f.promptAuthErr
+	}
+	return &proto.PromptAuthResponseResponse{Value: "http://localhost:8400/callback?code=abc&state=xyz"}, nil
 }
 
 func startFakeHostService(t *testing.T) (*grpc.ClientConn, func()) {
@@ -306,4 +325,83 @@ func TestHostServiceClient_GetAuthGroups_Unimplemented(t *testing.T) {
 	groups, err := c.GetAuthGroups(context.Background(), "gh")
 	require.NoError(t, err)
 	assert.Empty(t, groups)
+}
+
+func TestHostServiceClient_PromptAuthResponse(t *testing.T) {
+	fake, conn, cleanup := startFakeHostServiceWithFake(t)
+	defer cleanup()
+	c := NewHostServiceClient(conn)
+
+	val, err := c.PromptAuthResponse(context.Background(), "entra",
+		"https://login.example.com/authorize?client_id=abc", "http://localhost:8400/callback")
+	require.NoError(t, err)
+	assert.Equal(t, "http://localhost:8400/callback?code=abc&state=xyz", val)
+	require.NotNil(t, fake.lastPromptReq)
+	assert.Equal(t, "entra", fake.lastPromptReq.HandlerName)
+	assert.Equal(t, "https://login.example.com/authorize?client_id=abc", fake.lastPromptReq.AuthorizationUrl)
+	assert.Equal(t, "http://localhost:8400/callback", fake.lastPromptReq.RedirectUri)
+}
+
+func TestHostServiceClient_PromptAuthResponse_Unavailable(t *testing.T) {
+	fake, conn, cleanup := startFakeHostServiceWithFake(t)
+	defer cleanup()
+	fake.promptAuthErr = status.Error(codes.Unavailable, "non-interactive session")
+	c := NewHostServiceClient(conn)
+
+	_, err := c.PromptAuthResponse(context.Background(), "entra", "https://auth.example.com", "http://localhost:0/callback")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-interactive session")
+	assert.False(t, IsUnimplemented(err), "Unavailable must not be mistaken for Unimplemented")
+}
+
+func TestHostServiceClient_PromptAuthResponse_Canceled(t *testing.T) {
+	fake, conn, cleanup := startFakeHostServiceWithFake(t)
+	defer cleanup()
+	fake.promptAuthErr = status.Error(codes.Canceled, "user canceled")
+	c := NewHostServiceClient(conn)
+
+	_, err := c.PromptAuthResponse(context.Background(), "entra", "https://auth.example.com", "http://localhost:0/callback")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "user canceled")
+	assert.False(t, IsUnimplemented(err))
+}
+
+func TestHostServiceClient_PromptAuthResponse_Unimplemented(t *testing.T) {
+	// Start a server that returns gRPC Unimplemented for PromptAuthResponse
+	// (simulates an older host that hasn't implemented the RPC yet).
+	lis, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	s := grpc.NewServer()
+	proto.RegisterHostServiceServer(s, &proto.UnimplementedHostServiceServer{})
+	go func() { _ = s.Serve(lis) }()
+	defer s.Stop()
+
+	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	defer conn.Close()
+
+	c := NewHostServiceClient(conn)
+	_, err = c.PromptAuthResponse(context.Background(), "entra", "https://auth.example.com", "http://localhost:0/callback")
+	require.Error(t, err)
+	assert.True(t, IsUnimplemented(err), "older host should surface as Unimplemented")
+}
+
+func TestIsUnimplemented(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "raw status", err: status.Error(codes.Unimplemented, "rpc unimplemented"), want: true},
+		{name: "wrapped status", err: fmt.Errorf("host PromptAuthResponse: %w", status.Error(codes.Unimplemented, "boom")), want: true},
+		{name: "other code", err: status.Error(codes.Unavailable, "no tty"), want: false},
+		{name: "non-gRPC error", err: errors.New("plain error"), want: false},
+		{name: "wrapped non-gRPC error", err: fmt.Errorf("outer: %w", errors.New("inner")), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsUnimplemented(tt.err))
+		})
+	}
 }
