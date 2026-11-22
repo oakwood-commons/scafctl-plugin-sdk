@@ -46,6 +46,23 @@ func TestLoginOptions_HostnameRoundTrip(t *testing.T) {
 	empty, err := json.Marshal(LoginOptions{})
 	require.NoError(t, err)
 	assert.NotContains(t, string(empty), "hostname")
+	assert.NotContains(t, string(empty), "browser")
+}
+
+func TestLoginOptions_BrowserRoundTrip(t *testing.T) {
+	opts := LoginOptions{
+		Flow:         FlowInteractive,
+		CallbackPort: 18080,
+		Browser:      "chrome",
+	}
+	data, err := json.Marshal(opts)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"browser":"chrome"`)
+
+	var decoded LoginOptions
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	assert.Equal(t, "chrome", decoded.Browser)
+	assert.Equal(t, 18080, decoded.CallbackPort)
 }
 
 func TestToken_IsValidFor(t *testing.T) {

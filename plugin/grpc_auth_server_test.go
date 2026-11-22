@@ -444,6 +444,95 @@ func TestAuthGRPCServer_ConfigureAuthHandler_HostCapabilities(t *testing.T) {
 	}
 }
 
+func TestAuthGRPCServer_ConfigureAuthHandler_AuthCallbackPages(t *testing.T) {
+	oversized := make([]byte, MaxAuthCallbackPageBytes+1)
+	for i := range oversized {
+		oversized[i] = 'a'
+	}
+	exactMax := make([]byte, MaxAuthCallbackPageBytes)
+	for i := range exactMax {
+		exactMax[i] = 'b'
+	}
+
+	tests := []struct {
+		name        string
+		in          *proto.AuthCallbackPages
+		wantNil     bool
+		wantSuccess []byte
+		wantFailure []byte
+	}{
+		{
+			name:    "absent bundle stays nil",
+			in:      nil,
+			wantNil: true,
+		},
+		{
+			name:    "empty bundle normalizes to nil",
+			in:      &proto.AuthCallbackPages{},
+			wantNil: true,
+		},
+		{
+			name: "valid success and failure documents round-trip",
+			in: &proto.AuthCallbackPages{
+				SuccessHtml: []byte("<html><body>ok</body></html>"),
+				FailureHtml: []byte("<html><body>err</body></html>"),
+			},
+			wantSuccess: []byte("<html><body>ok</body></html>"),
+			wantFailure: []byte("<html><body>err</body></html>"),
+		},
+		{
+			name: "exact MaxAuthCallbackPageBytes boundary allowed",
+			in: &proto.AuthCallbackPages{
+				SuccessHtml: exactMax,
+			},
+			wantSuccess: exactMax,
+		},
+		{
+			name: "oversized success dropped while valid failure preserved",
+			in: &proto.AuthCallbackPages{
+				SuccessHtml: oversized,
+				FailureHtml: []byte("<html><body>safe fail</body></html>"),
+			},
+			wantFailure: []byte("<html><body>safe fail</body></html>"),
+		},
+		{
+			name: "both documents oversized normalizes to nil",
+			in: &proto.AuthCallbackPages{
+				SuccessHtml: oversized,
+				FailureHtml: oversized,
+			},
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotCfg ProviderConfig
+			srv := &AuthHandlerGRPCServer{
+				Impl: &mockAuthHandler{
+					configureAuthHandler: func(_ context.Context, _ string, cfg ProviderConfig) error {
+						gotCfg = cfg
+						return nil
+					},
+				},
+			}
+			resp, err := srv.ConfigureAuthHandler(context.Background(), &proto.ConfigureAuthHandlerRequest{
+				HandlerName:       "entra",
+				AuthCallbackPages: tt.in,
+			})
+			require.NoError(t, err)
+			assert.Empty(t, resp.Error)
+			if tt.wantNil {
+				assert.Nil(t, gotCfg.AuthCallbackPages)
+				return
+			}
+			require.NotNil(t, gotCfg.AuthCallbackPages)
+			assert.Equal(t, tt.wantSuccess, gotCfg.AuthCallbackPages.SuccessHTML)
+			assert.Equal(t, tt.wantFailure, gotCfg.AuthCallbackPages.FailureHTML)
+		})
+	}
+}
+
 func TestAuthGRPCServer_StopAuthHandler_ClosesConn(t *testing.T) {
 	conn, cleanup := startFakeHostService(t)
 	defer cleanup()
@@ -1157,6 +1246,259 @@ func TestAuthGRPCServer_ActivateServerMode_PassesSettings(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, resp.Error)
 	assert.JSONEq(t, `{"clientId":"abc"}`, string(received))
+}
+
+// --- Browser, per-RPC Settings, DetectAvailableFlows profile, and AuthGroupsProvider tests ---
+
+type mockGroupsAuthHandler struct {
+	mockAuthHandler
+	getGroups func(ctx context.Context, name string) ([]string, error)
+}
+
+func (m *mockGroupsAuthHandler) GetGroups(ctx context.Context, name string) ([]string, error) {
+	if m.getGroups != nil {
+		return m.getGroups(ctx, name)
+	}
+	return nil, nil
+}
+
+func TestAuthGRPCServer_Login_BrowserAndRequestSettings(t *testing.T) {
+	var capturedReq LoginRequest
+	var ctxSettings map[string]json.RawMessage
+	var ctxSettingsOK bool
+
+	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
+		login: func(ctx context.Context, _ string, req LoginRequest, _ func(DeviceCodePrompt)) (*LoginResponse, error) {
+			capturedReq = req
+			ctxSettings, ctxSettingsOK = RequestSettingsFromContext(ctx)
+			// Mutate req.Settings to verify isolation from ctxSettings.
+			req.Settings["clientId"] = json.RawMessage(`"mutated"`)
+			return &LoginResponse{Claims: &auth.Claims{Subject: "u"}, ExpiresAt: time.Now().Add(time.Hour)}, nil
+		},
+	}}
+	stream := &mockLoginStream{ctx: context.Background()}
+	err := srv.Login(&proto.LoginRequest{
+		HandlerName: "entra",
+		Flow:        "interactive",
+		Browser:     "edge",
+		Settings:    []byte(`{"clientId":"app-1","tenantId":"t-1"}`),
+	}, stream)
+	require.NoError(t, err)
+	assert.Equal(t, "edge", capturedReq.Browser)
+	require.True(t, ctxSettingsOK)
+	assert.JSONEq(t, `"app-1"`, string(ctxSettings["clientId"]))
+	assert.JSONEq(t, `"t-1"`, string(ctxSettings["tenantId"]))
+}
+
+func TestAuthGRPCServer_Login_InvalidSettings(t *testing.T) {
+	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{}}
+	stream := &mockLoginStream{ctx: context.Background()}
+	err := srv.Login(&proto.LoginRequest{
+		HandlerName: "entra",
+		Settings:    []byte(`{invalid`),
+	}, stream)
+	require.NoError(t, err)
+	require.Len(t, stream.messages, 1)
+	assert.Contains(t, stream.messages[0].GetError(), "failed to decode request settings")
+
+	// Also verify send error path when stream.Send fails.
+	failStream := &failingSendLoginStream{ctx: context.Background()}
+	err = srv.Login(&proto.LoginRequest{
+		HandlerName: "entra",
+		Settings:    []byte(`{invalid`),
+	}, failStream)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid settings and could not send error to host")
+}
+
+func TestAuthGRPCServer_GetStatus_RequestSettings(t *testing.T) {
+	var capturedReq StatusRequest
+	var ctxSettings map[string]json.RawMessage
+	var ctxOK bool
+	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
+		getStatus: func(ctx context.Context, _ string, req StatusRequest) (*auth.Status, error) {
+			capturedReq = req
+			ctxSettings, ctxOK = RequestSettingsFromContext(ctx)
+			return &auth.Status{Authenticated: true}, nil
+		},
+	}}
+	_, err := srv.GetStatus(context.Background(), &proto.GetStatusRequest{
+		HandlerName: "entra",
+		Profile:     "corp",
+		Hostname:    "login.example.com",
+		Settings:    []byte(`{"tenantId":"corp-tenant"}`),
+	})
+	require.NoError(t, err)
+	require.True(t, ctxOK)
+	assert.JSONEq(t, `"corp-tenant"`, string(ctxSettings["tenantId"]))
+	assert.JSONEq(t, `"corp-tenant"`, string(capturedReq.Settings["tenantId"]))
+
+	// Invalid JSON returns gRPC call error.
+	_, err = srv.GetStatus(context.Background(), &proto.GetStatusRequest{
+		HandlerName: "entra",
+		Settings:    []byte(`not-json`),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to decode request settings")
+}
+
+func TestAuthGRPCServer_GetToken_RequestSettings(t *testing.T) {
+	var capturedReq TokenRequest
+	var ctxSettings map[string]json.RawMessage
+	var ctxOK bool
+	srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
+		getToken: func(ctx context.Context, _ string, req TokenRequest) (*TokenResponse, error) {
+			capturedReq = req
+			ctxSettings, ctxOK = RequestSettingsFromContext(ctx)
+			return &TokenResponse{AccessToken: "tok", TokenType: "Bearer", ExpiresAt: time.Now().Add(time.Hour)}, nil
+		},
+	}}
+	_, err := srv.GetToken(context.Background(), &proto.GetTokenRequest{
+		HandlerName: "entra",
+		Profile:     "prod",
+		Settings:    []byte(`{"clientId":"prod-client"}`),
+	})
+	require.NoError(t, err)
+	require.True(t, ctxOK)
+	assert.JSONEq(t, `"prod-client"`, string(ctxSettings["clientId"]))
+	assert.JSONEq(t, `"prod-client"`, string(capturedReq.Settings["clientId"]))
+
+	// Invalid JSON returns gRPC call error.
+	_, err = srv.GetToken(context.Background(), &proto.GetTokenRequest{
+		HandlerName: "entra",
+		Settings:    []byte(`{bad`),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to decode request settings")
+}
+
+func TestAuthGRPCServer_DetectAvailableFlows_ProfileAndSettings(t *testing.T) {
+	t.Run("propagates non-empty profile and settings", func(t *testing.T) {
+		var gotProfile string
+		var gotSettings map[string]json.RawMessage
+		var gotOK bool
+		srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
+			detectAvailableFlows: func(ctx context.Context, _ string) ([]FlowAvailability, error) {
+				gotProfile = auth.ProfileFromContext(ctx)
+				gotSettings, gotOK = RequestSettingsFromContext(ctx)
+				return []FlowAvailability{{Flow: auth.FlowServicePrincipal, Available: true}}, nil
+			},
+		}}
+		resp, err := srv.DetectAvailableFlows(context.Background(), &proto.DetectAvailableFlowsRequest{
+			HandlerName: "entra",
+			Profile:     "ci",
+			Settings:    []byte(`{"clientId":"sp-id"}`),
+		})
+		require.NoError(t, err)
+		assert.Empty(t, resp.Error)
+		assert.Equal(t, "ci", gotProfile)
+		require.True(t, gotOK)
+		assert.JSONEq(t, `"sp-id"`, string(gotSettings["clientId"]))
+	})
+
+	t.Run("null or empty settings clears stale parent context values", func(t *testing.T) {
+		var gotProfile string
+		var gotOK bool
+		srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{
+			detectAvailableFlows: func(ctx context.Context, _ string) ([]FlowAvailability, error) {
+				gotProfile = auth.ProfileFromContext(ctx)
+				_, gotOK = RequestSettingsFromContext(ctx)
+				return nil, nil
+			},
+		}}
+		staleCtx := auth.WithProfile(WithRequestSettings(context.Background(), map[string]json.RawMessage{
+			"stale": json.RawMessage(`"value"`),
+		}), "stale-profile")
+		resp, err := srv.DetectAvailableFlows(staleCtx, &proto.DetectAvailableFlowsRequest{
+			HandlerName: "entra",
+			Settings:    []byte("null"),
+		})
+		require.NoError(t, err)
+		assert.Empty(t, resp.Error)
+		assert.Empty(t, gotProfile)
+		assert.False(t, gotOK)
+	})
+
+	t.Run("invalid settings returns response error", func(t *testing.T) {
+		srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{}}
+		resp, err := srv.DetectAvailableFlows(context.Background(), &proto.DetectAvailableFlowsRequest{
+			HandlerName: "entra",
+			Settings:    []byte("{invalid"),
+		})
+		require.NoError(t, err)
+		assert.Contains(t, resp.Error, "failed to decode request settings")
+	})
+}
+
+func TestAuthGRPCServer_GetGroups(t *testing.T) {
+	t.Run("unimplemented when plugin does not satisfy AuthGroupsProvider", func(t *testing.T) {
+		srv := &AuthHandlerGRPCServer{Impl: &mockAuthHandler{}}
+		resp, err := srv.GetGroups(context.Background(), &proto.GetGroupsRequest{HandlerName: "github"})
+		require.Error(t, err)
+		assert.Nil(t, resp)
+		assert.True(t, IsUnimplemented(err))
+	})
+
+	t.Run("success with host client, profile, and request settings", func(t *testing.T) {
+		conn, cleanup := startFakeHostService(t)
+		defer cleanup()
+
+		var gotHandler string
+		var gotProfile string
+		var gotSettings map[string]json.RawMessage
+		var gotSettingsOK bool
+		var hasHostClient bool
+
+		srv := &AuthHandlerGRPCServer{
+			Impl: &mockGroupsAuthHandler{
+				getGroups: func(ctx context.Context, name string) ([]string, error) {
+					gotHandler = name
+					gotProfile = auth.ProfileFromContext(ctx)
+					gotSettings, gotSettingsOK = RequestSettingsFromContext(ctx)
+					hasHostClient = HostClientFromContext(ctx) != nil
+					return []string{"grp-obj-1", "grp-obj-2"}, nil
+				},
+			},
+			hostClient: NewHostServiceClient(conn),
+		}
+		resp, err := srv.GetGroups(context.Background(), &proto.GetGroupsRequest{
+			HandlerName: "entra",
+			Profile:     "corp",
+			Settings:    []byte(`{"tenantId":"t-corp"}`),
+		})
+		require.NoError(t, err)
+		assert.Empty(t, resp.Error)
+		assert.Equal(t, []string{"grp-obj-1", "grp-obj-2"}, resp.Groups)
+		assert.Equal(t, "entra", gotHandler)
+		assert.Equal(t, "corp", gotProfile)
+		assert.True(t, hasHostClient)
+		require.True(t, gotSettingsOK)
+		assert.JSONEq(t, `"t-corp"`, string(gotSettings["tenantId"]))
+	})
+
+	t.Run("handler error returned in response.Error", func(t *testing.T) {
+		srv := &AuthHandlerGRPCServer{
+			Impl: &mockGroupsAuthHandler{
+				getGroups: func(_ context.Context, _ string) ([]string, error) {
+					return nil, errors.New("graph api forbidden")
+				},
+			},
+		}
+		resp, err := srv.GetGroups(context.Background(), &proto.GetGroupsRequest{HandlerName: "entra"})
+		require.NoError(t, err)
+		assert.Equal(t, "graph api forbidden", resp.Error)
+		assert.Empty(t, resp.Groups)
+	})
+
+	t.Run("invalid settings returned in response.Error", func(t *testing.T) {
+		srv := &AuthHandlerGRPCServer{Impl: &mockGroupsAuthHandler{}}
+		resp, err := srv.GetGroups(context.Background(), &proto.GetGroupsRequest{
+			HandlerName: "entra",
+			Settings:    []byte("{bad"),
+		})
+		require.NoError(t, err)
+		assert.Contains(t, resp.Error, "failed to decode request settings")
+	})
 }
 
 // --- suppress unused import warnings ---

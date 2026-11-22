@@ -464,11 +464,11 @@ type HostServiceClient interface {
 	// Plugins use this for authenticated HTTP requests and token refresh on 401.
 	GetAuthToken(ctx context.Context, in *GetAuthTokenRequest, opts ...grpc.CallOption) (*GetAuthTokenResponse, error)
 	// GetAuthGroups retrieves group memberships for the authenticated user.
-	// Only handlers that implement group queries (e.g. Entra) will return
-	// groups. If the selected handler does not support group queries, the host
-	// must return a successful GetAuthGroupsResponse with an empty groups list
-	// and no application error, rather than surfacing a gRPC Unimplemented
-	// error.
+	// Entries may be group IDs/ObjectIDs or names depending on the handler.
+	// If the selected handler does not support group queries, the host returns
+	// a GetAuthGroupsResponse with a non-empty error field (which
+	// HostServiceClient.GetAuthGroups surfaces as an error). Older hosts that
+	// predate this RPC return gRPC Unimplemented.
 	GetAuthGroups(ctx context.Context, in *GetAuthGroupsRequest, opts ...grpc.CallOption) (*GetAuthGroupsResponse, error)
 	// PromptAuthResponse asks the host to prompt the user for the redirect URL
 	// produced by an authorization code + PKCE login, and returns the pasted
@@ -614,11 +614,11 @@ type HostServiceServer interface {
 	// Plugins use this for authenticated HTTP requests and token refresh on 401.
 	GetAuthToken(context.Context, *GetAuthTokenRequest) (*GetAuthTokenResponse, error)
 	// GetAuthGroups retrieves group memberships for the authenticated user.
-	// Only handlers that implement group queries (e.g. Entra) will return
-	// groups. If the selected handler does not support group queries, the host
-	// must return a successful GetAuthGroupsResponse with an empty groups list
-	// and no application error, rather than surfacing a gRPC Unimplemented
-	// error.
+	// Entries may be group IDs/ObjectIDs or names depending on the handler.
+	// If the selected handler does not support group queries, the host returns
+	// a GetAuthGroupsResponse with a non-empty error field (which
+	// HostServiceClient.GetAuthGroups surfaces as an error). Older hosts that
+	// predate this RPC return gRPC Unimplemented.
 	GetAuthGroups(context.Context, *GetAuthGroupsRequest) (*GetAuthGroupsResponse, error)
 	// PromptAuthResponse asks the host to prompt the user for the redirect URL
 	// produced by an authorization code + PKCE login, and returns the pasted
@@ -920,6 +920,7 @@ const (
 	AuthHandlerService_StopAuthHandler_FullMethodName      = "/plugin.AuthHandlerService/StopAuthHandler"
 	AuthHandlerService_DetectAvailableFlows_FullMethodName = "/plugin.AuthHandlerService/DetectAvailableFlows"
 	AuthHandlerService_ActivateServerMode_FullMethodName   = "/plugin.AuthHandlerService/ActivateServerMode"
+	AuthHandlerService_GetGroups_FullMethodName            = "/plugin.AuthHandlerService/GetGroups"
 )
 
 // AuthHandlerServiceClient is the client API for AuthHandlerService service.
@@ -953,6 +954,10 @@ type AuthHandlerServiceClient interface {
 	DetectAvailableFlows(ctx context.Context, in *DetectAvailableFlowsRequest, opts ...grpc.CallOption) (*DetectAvailableFlowsResponse, error)
 	// ActivateServerMode transitions the handler into server mode for token serving.
 	ActivateServerMode(ctx context.Context, in *ActivateServerModeRequest, opts ...grpc.CallOption) (*ActivateServerModeResponse, error)
+	// GetGroups resolves group memberships for the authenticated identity of the
+	// named handler (e.g. when OIDC tokens omit groups due to claim overage).
+	// Plugins that do not implement AuthGroupsProvider return gRPC Unimplemented.
+	GetGroups(ctx context.Context, in *GetGroupsRequest, opts ...grpc.CallOption) (*GetGroupsResponse, error)
 }
 
 type authHandlerServiceClient struct {
@@ -1082,6 +1087,16 @@ func (c *authHandlerServiceClient) ActivateServerMode(ctx context.Context, in *A
 	return out, nil
 }
 
+func (c *authHandlerServiceClient) GetGroups(ctx context.Context, in *GetGroupsRequest, opts ...grpc.CallOption) (*GetGroupsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetGroupsResponse)
+	err := c.cc.Invoke(ctx, AuthHandlerService_GetGroups_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AuthHandlerServiceServer is the server API for AuthHandlerService service.
 // All implementations must embed UnimplementedAuthHandlerServiceServer
 // for forward compatibility.
@@ -1113,6 +1128,10 @@ type AuthHandlerServiceServer interface {
 	DetectAvailableFlows(context.Context, *DetectAvailableFlowsRequest) (*DetectAvailableFlowsResponse, error)
 	// ActivateServerMode transitions the handler into server mode for token serving.
 	ActivateServerMode(context.Context, *ActivateServerModeRequest) (*ActivateServerModeResponse, error)
+	// GetGroups resolves group memberships for the authenticated identity of the
+	// named handler (e.g. when OIDC tokens omit groups due to claim overage).
+	// Plugins that do not implement AuthGroupsProvider return gRPC Unimplemented.
+	GetGroups(context.Context, *GetGroupsRequest) (*GetGroupsResponse, error)
 	mustEmbedUnimplementedAuthHandlerServiceServer()
 }
 
@@ -1155,6 +1174,9 @@ func (UnimplementedAuthHandlerServiceServer) DetectAvailableFlows(context.Contex
 }
 func (UnimplementedAuthHandlerServiceServer) ActivateServerMode(context.Context, *ActivateServerModeRequest) (*ActivateServerModeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ActivateServerMode not implemented")
+}
+func (UnimplementedAuthHandlerServiceServer) GetGroups(context.Context, *GetGroupsRequest) (*GetGroupsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetGroups not implemented")
 }
 func (UnimplementedAuthHandlerServiceServer) mustEmbedUnimplementedAuthHandlerServiceServer() {}
 func (UnimplementedAuthHandlerServiceServer) testEmbeddedByValue()                            {}
@@ -1368,6 +1390,24 @@ func _AuthHandlerService_ActivateServerMode_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthHandlerService_GetGroups_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetGroupsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthHandlerServiceServer).GetGroups(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthHandlerService_GetGroups_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthHandlerServiceServer).GetGroups(ctx, req.(*GetGroupsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AuthHandlerService_ServiceDesc is the grpc.ServiceDesc for AuthHandlerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1414,6 +1454,10 @@ var AuthHandlerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ActivateServerMode",
 			Handler:    _AuthHandlerService_ActivateServerMode_Handler,
+		},
+		{
+			MethodName: "GetGroups",
+			Handler:    _AuthHandlerService_GetGroups_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

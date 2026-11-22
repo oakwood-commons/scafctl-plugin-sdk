@@ -398,22 +398,27 @@ func TestIntegration_ExecuteProviderStream_Error(t *testing.T) {
 // --- Auth Handler Plugin Integration Tests ---
 
 type mockAuthPlugin struct {
-	handlers          []plugin.AuthHandlerInfo
-	configuredNames   []string
-	configuredCfgs    []plugin.ProviderConfig
-	loginResult       *plugin.LoginResponse
-	loginErr          error
-	capturedLoginReq  plugin.LoginRequest
-	capturedTokenReq  plugin.TokenRequest
-	capturedStatusReq plugin.StatusRequest
-	capturedLogoutReq plugin.LogoutRequest
-	statusResult      *auth.Status
-	tokenResult       *plugin.TokenResponse
-	cachedTokens      []*auth.CachedTokenInfo
-	purgedCount       int
-	availableFlows    []plugin.FlowAvailability
-	stoppedHandlers   []string
-	loggedOutHandler  string
+	handlers               []plugin.AuthHandlerInfo
+	configuredNames        []string
+	configuredCfgs         []plugin.ProviderConfig
+	loginResult            *plugin.LoginResponse
+	loginErr               error
+	capturedLoginReq       plugin.LoginRequest
+	capturedLoginSettings  map[string]json.RawMessage
+	capturedTokenReq       plugin.TokenRequest
+	capturedTokenSettings  map[string]json.RawMessage
+	capturedStatusReq      plugin.StatusRequest
+	capturedStatusSettings map[string]json.RawMessage
+	capturedLogoutReq      plugin.LogoutRequest
+	capturedDetectProfile  string
+	capturedDetectSettings map[string]json.RawMessage
+	statusResult           *auth.Status
+	tokenResult            *plugin.TokenResponse
+	cachedTokens           []*auth.CachedTokenInfo
+	purgedCount            int
+	availableFlows         []plugin.FlowAvailability
+	stoppedHandlers        []string
+	loggedOutHandler       string
 }
 
 func (m *mockAuthPlugin) GetAuthHandlers(_ context.Context) ([]plugin.AuthHandlerInfo, error) {
@@ -426,8 +431,9 @@ func (m *mockAuthPlugin) ConfigureAuthHandler(_ context.Context, name string, cf
 	return nil
 }
 
-func (m *mockAuthPlugin) Login(_ context.Context, _ string, req plugin.LoginRequest, cb func(plugin.DeviceCodePrompt)) (*plugin.LoginResponse, error) {
+func (m *mockAuthPlugin) Login(ctx context.Context, _ string, req plugin.LoginRequest, cb func(plugin.DeviceCodePrompt)) (*plugin.LoginResponse, error) {
 	m.capturedLoginReq = req
+	m.capturedLoginSettings, _ = plugin.RequestSettingsFromContext(ctx)
 	if m.loginErr != nil {
 		return nil, m.loginErr
 	}
@@ -445,13 +451,15 @@ func (m *mockAuthPlugin) Logout(_ context.Context, name string, req plugin.Logou
 	return nil
 }
 
-func (m *mockAuthPlugin) GetStatus(_ context.Context, _ string, req plugin.StatusRequest) (*auth.Status, error) {
+func (m *mockAuthPlugin) GetStatus(ctx context.Context, _ string, req plugin.StatusRequest) (*auth.Status, error) {
 	m.capturedStatusReq = req
+	m.capturedStatusSettings, _ = plugin.RequestSettingsFromContext(ctx)
 	return m.statusResult, nil
 }
 
-func (m *mockAuthPlugin) GetToken(_ context.Context, _ string, req plugin.TokenRequest) (*plugin.TokenResponse, error) {
+func (m *mockAuthPlugin) GetToken(ctx context.Context, _ string, req plugin.TokenRequest) (*plugin.TokenResponse, error) {
 	m.capturedTokenReq = req
+	m.capturedTokenSettings, _ = plugin.RequestSettingsFromContext(ctx)
 	return m.tokenResult, nil
 }
 
@@ -463,7 +471,9 @@ func (m *mockAuthPlugin) PurgeExpiredTokens(_ context.Context, _ string) (int, e
 	return m.purgedCount, nil
 }
 
-func (m *mockAuthPlugin) DetectAvailableFlows(_ context.Context, _ string) ([]plugin.FlowAvailability, error) {
+func (m *mockAuthPlugin) DetectAvailableFlows(ctx context.Context, _ string) ([]plugin.FlowAvailability, error) {
+	m.capturedDetectProfile = auth.ProfileFromContext(ctx)
+	m.capturedDetectSettings, _ = plugin.RequestSettingsFromContext(ctx)
 	return m.availableFlows, nil
 }
 
@@ -575,12 +585,20 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 			HandlerName: "github", BinaryName: "scafctl", Quiet: true,
 			Profile:  "corp",
 			Settings: map[string][]byte{"org": []byte(`"my-org"`)},
+			AuthCallbackPages: &proto.AuthCallbackPages{
+				SuccessHtml: []byte("<html>ok</html>"),
+				FailureHtml: []byte("<html>fail</html>"),
+			},
 		})
 		require.NoError(t, err)
 		assert.Empty(t, resp.Error)
 		assert.Equal(t, plugin.PluginProtocolVersion, resp.ProtocolVersion)
 		require.NotEmpty(t, mock.configuredCfgs)
-		assert.Equal(t, "corp", mock.configuredCfgs[len(mock.configuredCfgs)-1].Profile)
+		lastCfg := mock.configuredCfgs[len(mock.configuredCfgs)-1]
+		assert.Equal(t, "corp", lastCfg.Profile)
+		require.NotNil(t, lastCfg.AuthCallbackPages)
+		assert.Equal(t, []byte("<html>ok</html>"), lastCfg.AuthCallbackPages.SuccessHTML)
+		assert.Equal(t, []byte("<html>fail</html>"), lastCfg.AuthCallbackPages.FailureHTML)
 	})
 
 	t.Run("Login", func(t *testing.T) {
@@ -592,6 +610,8 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 			TimeoutSeconds: 300,
 			Hostname:       "pd1020",
 			CallbackPort:   18080,
+			Browser:        "firefox",
+			Settings:       []byte(`{"org":"oakwood"}`),
 		})
 		require.NoError(t, err)
 
@@ -620,6 +640,9 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 		assert.Equal(t, "pd1020", mock.capturedLoginReq.Hostname)
 		assert.Equal(t, 18080, mock.capturedLoginReq.CallbackPort)
 		assert.Equal(t, "tenant-1", mock.capturedLoginReq.TenantID)
+		assert.Equal(t, "firefox", mock.capturedLoginReq.Browser)
+		assert.JSONEq(t, `"oakwood"`, string(mock.capturedLoginReq.Settings["org"]))
+		assert.JSONEq(t, `"oakwood"`, string(mock.capturedLoginSettings["org"]))
 	})
 
 	t.Run("Login_Error", func(t *testing.T) {
@@ -656,7 +679,11 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 	})
 
 	t.Run("GetStatus", func(t *testing.T) {
-		resp, err := client.GetStatus(ctx, &proto.GetStatusRequest{HandlerName: "github", Hostname: "cluster-b"})
+		resp, err := client.GetStatus(ctx, &proto.GetStatusRequest{
+			HandlerName: "github",
+			Hostname:    "cluster-b",
+			Settings:    []byte(`{"org":"status-org"}`),
+		})
 		require.NoError(t, err)
 		assert.True(t, resp.Authenticated)
 		assert.Equal(t, "user123", resp.Claims.Subject)
@@ -665,6 +692,8 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 		assert.Equal(t, []string{"read", "write"}, resp.Scopes)
 		assert.Equal(t, "cluster-b", resp.Hostname)
 		assert.Equal(t, "cluster-b", mock.capturedStatusReq.Hostname)
+		assert.JSONEq(t, `"status-org"`, string(mock.capturedStatusReq.Settings["org"]))
+		assert.JSONEq(t, `"status-org"`, string(mock.capturedStatusSettings["org"]))
 	})
 
 	t.Run("GetToken", func(t *testing.T) {
@@ -674,6 +703,7 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 			MinValidForSeconds: 60,
 			ForceRefresh:       true,
 			Hostname:           "pd1020",
+			Settings:           []byte(`{"org":"token-org"}`),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "tok-abc", resp.AccessToken)
@@ -682,6 +712,8 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 		assert.Equal(t, "device_code", resp.Flow)
 		assert.Equal(t, "sess-1", resp.SessionId)
 		assert.Equal(t, "pd1020", mock.capturedTokenReq.Hostname)
+		assert.JSONEq(t, `"token-org"`, string(mock.capturedTokenReq.Settings["org"]))
+		assert.JSONEq(t, `"token-org"`, string(mock.capturedTokenSettings["org"]))
 	})
 
 	t.Run("ListCachedTokens", func(t *testing.T) {
@@ -708,7 +740,11 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 	})
 
 	t.Run("DetectAvailableFlows", func(t *testing.T) {
-		resp, err := client.DetectAvailableFlows(ctx, &proto.DetectAvailableFlowsRequest{HandlerName: "github"})
+		resp, err := client.DetectAvailableFlows(ctx, &proto.DetectAvailableFlowsRequest{
+			HandlerName: "github",
+			Profile:     "corp",
+			Settings:    []byte(`{"org":"oakwood"}`),
+		})
 		require.NoError(t, err)
 		assert.Empty(t, resp.Error)
 		require.Len(t, resp.Flows, 2)
@@ -716,7 +752,123 @@ func TestIntegration_AuthHandlerRoundTrip(t *testing.T) {
 		assert.True(t, resp.Flows[0].Available)
 		assert.Equal(t, "pat", resp.Flows[1].Flow)
 		assert.False(t, resp.Flows[1].Available)
+		assert.Equal(t, "corp", mock.capturedDetectProfile)
+		assert.JSONEq(t, `"oakwood"`, string(mock.capturedDetectSettings["org"]))
 	})
+
+	t.Run("GetGroups_Unimplemented", func(t *testing.T) {
+		_, err := client.GetGroups(ctx, &proto.GetGroupsRequest{HandlerName: "github", Profile: "corp"})
+		require.Error(t, err)
+		assert.True(t, plugin.IsUnimplemented(err))
+	})
+}
+
+type mockGroupsAuthPlugin struct {
+	mockAuthPlugin
+	groups          []string
+	groupsErr       error
+	capturedProfile string
+	capturedSetting json.RawMessage
+}
+
+func (m *mockGroupsAuthPlugin) GetGroups(ctx context.Context, _ string) ([]string, error) {
+	m.capturedProfile = auth.ProfileFromContext(ctx)
+	if s, ok := plugin.RequestSettingsFromContext(ctx); ok {
+		m.capturedSetting = s["tenantId"]
+	}
+	return m.groups, m.groupsErr
+}
+
+func TestIntegration_AuthGroupsProviderRoundTrip(t *testing.T) {
+	t.Parallel()
+	mock := &mockGroupsAuthPlugin{
+		groups: []string{"00000000-0000-0000-0000-000000000001", "platform-admins"},
+	}
+	client, cleanup := startAuthServer(t, mock)
+	defer cleanup()
+
+	resp, err := client.GetGroups(context.Background(), &proto.GetGroupsRequest{
+		HandlerName: "entra",
+		Profile:     "prod",
+		Settings:    []byte(`{"tenantId":"tenant-prod"}`),
+	})
+	require.NoError(t, err)
+	assert.Empty(t, resp.Error)
+	assert.Equal(t, []string{"00000000-0000-0000-0000-000000000001", "platform-admins"}, resp.Groups)
+	assert.Equal(t, "prod", mock.capturedProfile)
+	assert.JSONEq(t, `"tenant-prod"`, string(mock.capturedSetting))
+}
+
+type integrationHostService struct {
+	proto.UnimplementedHostServiceServer
+	lastTokenReq  *proto.GetAuthTokenRequest
+	lastGroupsReq *proto.GetAuthGroupsRequest
+}
+
+func (h *integrationHostService) GetSecret(_ context.Context, req *proto.GetSecretRequest) (*proto.GetSecretResponse, error) {
+	if req.Name == "github/pat" {
+		return &proto.GetSecretResponse{Value: "ghp_test_value", Found: true}, nil
+	}
+	return &proto.GetSecretResponse{Found: false}, nil
+}
+
+func (h *integrationHostService) GetAuthToken(_ context.Context, req *proto.GetAuthTokenRequest) (*proto.GetAuthTokenResponse, error) {
+	cp := proto.GetAuthTokenRequest{
+		HandlerName:        req.HandlerName,
+		Scope:              req.Scope,
+		MinValidForSeconds: req.MinValidForSeconds,
+		ForceRefresh:       req.ForceRefresh,
+		Profile:            req.Profile,
+		Hostname:           req.Hostname,
+	}
+	h.lastTokenReq = &cp
+	return &proto.GetAuthTokenResponse{AccessToken: "host-tok", TokenType: "Bearer"}, nil
+}
+
+func (h *integrationHostService) GetAuthGroups(_ context.Context, req *proto.GetAuthGroupsRequest) (*proto.GetAuthGroupsResponse, error) {
+	cp := proto.GetAuthGroupsRequest{HandlerName: req.HandlerName, Profile: req.Profile}
+	h.lastGroupsReq = &cp
+	return &proto.GetAuthGroupsResponse{Groups: []string{"grp-1", "grp-2"}}, nil
+}
+
+func TestIntegration_HostServiceRoundTrip(t *testing.T) {
+	t.Parallel()
+	lis, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	hostSvc := &integrationHostService{}
+	s := grpc.NewServer()
+	proto.RegisterHostServiceServer(s, hostSvc)
+	go func() { _ = s.Serve(lis) }()
+	defer s.Stop()
+
+	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	defer conn.Close()
+
+	hc := plugin.NewHostServiceClient(conn)
+	ctx := auth.WithProfile(context.Background(), "staging")
+
+	tokResp, err := hc.GetAuthTokenWithOptions(ctx, plugin.AuthTokenRequest{
+		Handler:  "github",
+		Scope:    "repo",
+		Hostname: "ghe.example.com",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "host-tok", tokResp.AccessToken)
+	require.NotNil(t, hostSvc.lastTokenReq)
+	assert.Equal(t, "staging", hostSvc.lastTokenReq.Profile)
+	assert.Equal(t, "ghe.example.com", hostSvc.lastTokenReq.Hostname)
+
+	groups, err := hc.GetAuthGroups(ctx, "entra")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"grp-1", "grp-2"}, groups)
+	require.NotNil(t, hostSvc.lastGroupsReq)
+	assert.Equal(t, "staging", hostSvc.lastGroupsReq.Profile)
+
+	secretVal, err := plugin.SecretRef("secret://github/pat").ResolveWithHost(ctx, hc)
+	require.NoError(t, err)
+	assert.Equal(t, "ghp_test_value", secretVal)
 }
 
 // --- GRPCPlugin / AuthHandlerGRPCPlugin round-trip tests ---

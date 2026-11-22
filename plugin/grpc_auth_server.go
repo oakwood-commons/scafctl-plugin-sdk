@@ -4,6 +4,7 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,8 @@ import (
 	"github.com/oakwood-commons/scafctl-plugin-sdk/auth"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/plugin/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // AuthHandlerGRPCServer implements the gRPC server for auth handler plugins.
@@ -62,6 +65,14 @@ func (s *AuthHandlerGRPCServer) Login(req *proto.LoginRequest, stream grpc.Serve
 	ctx := s.injectHostClient(stream.Context())
 	ctx = auth.WithProfile(ctx, req.Profile)
 	lgr := logr.FromContextOrDiscard(ctx)
+	settings, settingsErr := decodeRequestSettings(req.Settings)
+	if settingsErr != nil {
+		if sendErr := stream.Send(&proto.LoginStreamMessage{Payload: &proto.LoginStreamMessage_Error{Error: settingsErr.Error()}}); sendErr != nil {
+			return fmt.Errorf("Login %q: invalid settings and could not send error to host: %w", req.HandlerName, sendErr)
+		}
+		return nil
+	}
+	ctx = WithRequestSettings(ctx, settings)
 	var sendFailed atomic.Bool
 	deviceCodeCb := func(prompt DeviceCodePrompt) {
 		if sendFailed.Load() {
@@ -82,6 +93,7 @@ func (s *AuthHandlerGRPCServer) Login(req *proto.LoginRequest, stream grpc.Serve
 		TenantID: req.TenantId, Scopes: req.Scopes,
 		Flow: auth.Flow(req.Flow), Timeout: time.Duration(req.TimeoutSeconds) * time.Second,
 		Hostname: req.Hostname, CallbackPort: int(req.CallbackPort),
+		Browser: req.Browser, Settings: cloneSettingsMap(settings),
 	}
 	result, err := s.Impl.Login(ctx, req.HandlerName, loginReq, deviceCodeCb)
 	if err != nil {
@@ -116,7 +128,12 @@ func (s *AuthHandlerGRPCServer) Logout(ctx context.Context, req *proto.LogoutReq
 func (s *AuthHandlerGRPCServer) GetStatus(ctx context.Context, req *proto.GetStatusRequest) (*proto.GetStatusResponse, error) {
 	ctx = s.injectHostClient(ctx)
 	ctx = auth.WithProfile(ctx, req.Profile)
-	st, err := s.Impl.GetStatus(ctx, req.HandlerName, StatusRequest{Hostname: req.Hostname})
+	settings, err := decodeRequestSettings(req.Settings)
+	if err != nil {
+		return nil, fmt.Errorf("GetStatus %q: %w", req.HandlerName, err)
+	}
+	ctx = WithRequestSettings(ctx, settings)
+	st, err := s.Impl.GetStatus(ctx, req.HandlerName, StatusRequest{Hostname: req.Hostname, Settings: cloneSettingsMap(settings)})
 	if err != nil {
 		return nil, fmt.Errorf("GetStatus %q: %w", req.HandlerName, err)
 	}
@@ -126,7 +143,21 @@ func (s *AuthHandlerGRPCServer) GetStatus(ctx context.Context, req *proto.GetSta
 func (s *AuthHandlerGRPCServer) GetToken(ctx context.Context, req *proto.GetTokenRequest) (*proto.GetTokenResponse, error) {
 	ctx = s.injectHostClient(ctx)
 	ctx = auth.WithProfile(ctx, req.Profile)
-	tokenReq := TokenRequest{Scope: req.Scope, MinValidFor: time.Duration(req.MinValidForSeconds) * time.Second, ForceRefresh: req.ForceRefresh, ServerContext: auth.ServerContext(req.ServerContext), Caller: auth.CallerType(req.Caller), Assertion: req.Assertion, Hostname: req.Hostname}
+	settings, err := decodeRequestSettings(req.Settings)
+	if err != nil {
+		return nil, fmt.Errorf("GetToken %q: %w", req.HandlerName, err)
+	}
+	ctx = WithRequestSettings(ctx, settings)
+	tokenReq := TokenRequest{
+		Scope:         req.Scope,
+		MinValidFor:   time.Duration(req.MinValidForSeconds) * time.Second,
+		ForceRefresh:  req.ForceRefresh,
+		ServerContext: auth.ServerContext(req.ServerContext),
+		Caller:        auth.CallerType(req.Caller),
+		Assertion:     req.Assertion,
+		Hostname:      req.Hostname,
+		Settings:      cloneSettingsMap(settings),
+	}
 	token, err := s.Impl.GetToken(ctx, req.HandlerName, tokenReq)
 	if err != nil {
 		return nil, fmt.Errorf("GetToken %q: %w", req.HandlerName, err)
@@ -166,7 +197,16 @@ func (s *AuthHandlerGRPCServer) ConfigureAuthHandler(ctx context.Context, req *p
 	for k, v := range req.Settings {
 		settings[k] = json.RawMessage(v)
 	}
-	cfg := ProviderConfig{Quiet: req.Quiet, NoColor: req.NoColor, BinaryName: req.BinaryName, Profile: req.Profile, Settings: settings, HostServiceID: req.HostServiceId, HostCapabilities: hostCapabilitiesFromProto(req.HostCapabilities)}
+	cfg := ProviderConfig{
+		Quiet:             req.Quiet,
+		NoColor:           req.NoColor,
+		BinaryName:        req.BinaryName,
+		Profile:           req.Profile,
+		Settings:          settings,
+		HostServiceID:     req.HostServiceId,
+		HostCapabilities:  hostCapabilitiesFromProto(req.HostCapabilities),
+		AuthCallbackPages: authCallbackPagesFromProto(req.AuthCallbackPages),
+	}
 	// Dial the host's HostService broker if an ID was provided and a dial
 	// function is available. When no broker or dialFunc is set (e.g. in tests),
 	// this is a no-op.
@@ -266,6 +306,12 @@ func (s *AuthHandlerGRPCServer) pickDialFunc() func(id uint32) (*grpc.ClientConn
 
 func (s *AuthHandlerGRPCServer) DetectAvailableFlows(ctx context.Context, req *proto.DetectAvailableFlowsRequest) (*proto.DetectAvailableFlowsResponse, error) {
 	ctx = s.injectHostClient(ctx)
+	ctx = auth.WithProfile(ctx, req.Profile)
+	settings, err := decodeRequestSettings(req.Settings)
+	if err != nil {
+		return &proto.DetectAvailableFlowsResponse{Error: err.Error()}, nil //nolint:nilerr
+	}
+	ctx = WithRequestSettings(ctx, settings)
 	flows, err := s.Impl.DetectAvailableFlows(ctx, req.HandlerName)
 	if err != nil {
 		return &proto.DetectAvailableFlowsResponse{Error: err.Error()}, nil //nolint:nilerr
@@ -294,13 +340,79 @@ func (s *AuthHandlerGRPCServer) ActivateServerMode(ctx context.Context, req *pro
 	return &proto.ActivateServerModeResponse{}, nil
 }
 
+func (s *AuthHandlerGRPCServer) GetGroups(ctx context.Context, req *proto.GetGroupsRequest) (*proto.GetGroupsResponse, error) {
+	gp, ok := s.Impl.(AuthGroupsProvider)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "auth handler plugin does not implement AuthGroupsProvider")
+	}
+	ctx = s.injectHostClient(ctx)
+	ctx = auth.WithProfile(ctx, req.Profile)
+	settings, err := decodeRequestSettings(req.Settings)
+	if err != nil {
+		return &proto.GetGroupsResponse{Error: err.Error()}, nil //nolint:nilerr
+	}
+	ctx = WithRequestSettings(ctx, settings)
+	groups, err := gp.GetGroups(ctx, req.HandlerName)
+	if err != nil {
+		return &proto.GetGroupsResponse{Error: err.Error()}, nil //nolint:nilerr
+	}
+	return &proto.GetGroupsResponse{Groups: groups}, nil
+}
+
 // ---- Conversion helpers ----
+
+func decodeRequestSettings(raw []byte) (map[string]json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &parsed); err != nil {
+		return nil, fmt.Errorf("failed to decode request settings: %w", err)
+	}
+	if parsed == nil {
+		return nil, nil
+	}
+	out := make(map[string]json.RawMessage, len(parsed))
+	for k, v := range parsed {
+		out[k] = json.RawMessage(bytes.Clone(v))
+	}
+	return out, nil
+}
+
+func cloneSettingsMap(in map[string]json.RawMessage) map[string]json.RawMessage {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]json.RawMessage, len(in))
+	for k, v := range in {
+		out[k] = json.RawMessage(bytes.Clone(v))
+	}
+	return out
+}
 
 func hostCapabilitiesFromProto(hc *proto.HostCapabilities) *HostCapabilities {
 	if hc == nil {
 		return nil
 	}
 	return &HostCapabilities{PromptAuthResponse: hc.PromptAuthResponse}
+}
+
+func authCallbackPagesFromProto(p *proto.AuthCallbackPages) *AuthCallbackPages {
+	if p == nil {
+		return nil
+	}
+	var out AuthCallbackPages
+	if len(p.SuccessHtml) > 0 && len(p.SuccessHtml) <= MaxAuthCallbackPageBytes {
+		out.SuccessHTML = append([]byte(nil), p.SuccessHtml...)
+	}
+	if len(p.FailureHtml) > 0 && len(p.FailureHtml) <= MaxAuthCallbackPageBytes {
+		out.FailureHTML = append([]byte(nil), p.FailureHtml...)
+	}
+	if len(out.SuccessHTML) == 0 && len(out.FailureHTML) == 0 {
+		return nil
+	}
+	return &out
 }
 
 func claimsToProto(c *auth.Claims) *proto.Claims {
