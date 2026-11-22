@@ -470,8 +470,8 @@ func descriptorToProto(desc *provider.Descriptor) *proto.ProviderDescriptor {
 		WriteOperations:        desc.WriteOperations,
 		Operations:             operationsToProto(desc.Operations),
 	}
-	for i, cap := range desc.Capabilities {
-		pd.Capabilities[i] = string(cap)
+	for i, c := range desc.Capabilities {
+		pd.Capabilities[i] = string(c)
 	}
 	for _, link := range desc.Links {
 		pd.Links = append(pd.Links, &proto.Link{Name: link.Name, Url: link.URL})
@@ -491,15 +491,15 @@ func descriptorToProto(desc *provider.Descriptor) *proto.ProviderDescriptor {
 	if len(desc.OutputSchemas) > 0 {
 		pd.OutputSchemas = make(map[string]*proto.Schema)
 		pd.RawOutputSchemas = make(map[string][]byte, len(desc.OutputSchemas))
-		for cap, schema := range desc.OutputSchemas {
+		for c, schema := range desc.OutputSchemas {
 			if schema == nil {
 				continue
 			}
 			if raw, err := json.Marshal(schema); err == nil {
-				pd.RawOutputSchemas[string(cap)] = raw
+				pd.RawOutputSchemas[string(c)] = raw
 			}
 			if ps := schemaToProto(schema); ps != nil {
-				pd.OutputSchemas[string(cap)] = ps
+				pd.OutputSchemas[string(c)] = ps
 			}
 		}
 	}
@@ -606,8 +606,8 @@ func ProtoToDescriptor(pd *proto.ProviderDescriptor) (*provider.Descriptor, erro
 		WriteOperations: pd.WriteOperations,
 		Operations:      protoToOperations(pd.Operations),
 	}
-	for i, cap := range pd.Capabilities {
-		desc.Capabilities[i] = provider.Capability(cap)
+	for i, c := range pd.Capabilities {
+		desc.Capabilities[i] = provider.Capability(c)
 	}
 	for _, link := range pd.Links {
 		desc.Links = append(desc.Links, provider.Link{Name: link.Name, URL: link.Url})

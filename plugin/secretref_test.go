@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -108,23 +109,24 @@ func TestSecretRef_Validate_SecretScheme(t *testing.T) {
 		wantErr string
 	}{
 		{name: "valid simple name", ref: SecretRef("secret://github-pat")},
-		{name: "valid slash and underscore", ref: SecretRef("secret://org/api_key_1")},
+		{name: "valid dot underscore and dash", ref: SecretRef("secret://org.api_key_1-prod")},
+		{name: "valid single char", ref: SecretRef("secret://a")},
+		{name: "valid max length 255", ref: SecretRef("secret://" + strings.Repeat("a", 255))},
 		{name: "valid non-reserved scafctl_ prefix", ref: SecretRef("secret://scafctl_custom")},
 		{name: "empty name", ref: SecretRef("secret://"), wantErr: "requires a secret name"},
 		{name: "whitespace-only name", ref: SecretRef("secret://   "), wantErr: "requires a secret name"},
-		{name: "contains traversal", ref: SecretRef("secret://../etc/passwd"), wantErr: "must not contain '..'"},
+		{name: "exceeds max length 256", ref: SecretRef("secret://" + strings.Repeat("a", 256)), wantErr: "exceeds maximum length of 255 bytes"},
+		{name: "leading dot", ref: SecretRef("secret://.deploy-token"), wantErr: "must not start with '.' or '-'"},
+		{name: "single dot", ref: SecretRef("secret://."), wantErr: "must not start with '.' or '-'"},
+		{name: "leading dash", ref: SecretRef("secret://-deploy-token"), wantErr: "must not start with '.' or '-'"},
+		{name: "leading underscore", ref: SecretRef("secret://_deploy_token"), wantErr: "contains invalid characters"},
+		{name: "contains traversal", ref: SecretRef("secret://../etc/passwd"), wantErr: "must not start with '.' or '-'"},
 		{name: "contains embedded double-dot", ref: SecretRef("secret://foo..bar"), wantErr: "must not contain '..'"},
+		{name: "slash separator rejected", ref: SecretRef("secret://org/api_key_1"), wantErr: "contains invalid characters"},
+		{name: "leading slash rejected", ref: SecretRef("secret:///scafctl.auth.github"), wantErr: "contains invalid characters"},
+		{name: "backslash separator rejected", ref: SecretRef(`secret://org\my-token`), wantErr: "contains invalid characters"},
+		{name: "surrounding whitespace rejected", ref: SecretRef("secret:// my-token "), wantErr: "contains invalid characters"},
 		{name: "reserved scafctl. prefix", ref: SecretRef("secret://scafctl.auth.github"), wantErr: "must not start with reserved prefix"},
-		{name: "reserved scafctl. prefix with leading space", ref: SecretRef("secret:// scafctl.token"), wantErr: "must not start with reserved prefix"},
-		{name: "reserved scafctl. prefix via leading slash", ref: SecretRef("secret:///scafctl.auth.github"), wantErr: "must not start with reserved prefix"},
-		{name: "reserved scafctl. prefix via dot-slash", ref: SecretRef("secret://./scafctl.auth.github"), wantErr: "must not start with reserved prefix"},
-		{name: "surrounding whitespace", ref: SecretRef("secret:// my-token "), wantErr: "leading or trailing whitespace"},
-		{name: "dot segment only", ref: SecretRef("secret://."), wantErr: "clean relative secret name"},
-		{name: "slash only", ref: SecretRef("secret:///"), wantErr: "clean relative secret name"},
-		{name: "leading slash", ref: SecretRef("secret:///my-token"), wantErr: "clean relative secret name"},
-		{name: "trailing slash", ref: SecretRef("secret://org/my-token/"), wantErr: "clean relative secret name"},
-		{name: "dot-slash segment", ref: SecretRef("secret://./my-token"), wantErr: "clean relative secret name"},
-		{name: "backslash separator", ref: SecretRef(`secret://org\my-token`), wantErr: "clean relative secret name"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

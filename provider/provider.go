@@ -398,19 +398,19 @@ func ValidateDescriptor(desc *Descriptor) error {
 
 	var errs []error
 
-	for _, cap := range desc.Capabilities {
-		if !cap.IsValid() {
-			errs = append(errs, fmt.Errorf("unknown capability %q", cap))
+	for _, capability := range desc.Capabilities {
+		if !capability.IsValid() {
+			errs = append(errs, fmt.Errorf("unknown capability %q", capability))
 			continue
 		}
 
-		schema, exists := desc.OutputSchemas[cap]
+		schema, exists := desc.OutputSchemas[capability]
 		if !exists {
-			errs = append(errs, fmt.Errorf("missing output schema for capability %q", cap))
+			errs = append(errs, fmt.Errorf("missing output schema for capability %q", capability))
 			continue
 		}
 
-		requiredFields := getCapabilityRequiredFields(cap)
+		requiredFields := getCapabilityRequiredFields(capability)
 		fieldNames := make([]string, 0, len(requiredFields))
 		for fieldName := range requiredFields {
 			fieldNames = append(fieldNames, fieldName)
@@ -419,16 +419,16 @@ func ValidateDescriptor(desc *Descriptor) error {
 		for _, fieldName := range fieldNames {
 			expectedType := requiredFields[fieldName]
 			if schema == nil || schema.Properties == nil {
-				errs = append(errs, fmt.Errorf("capability %q requires output field %q", cap, fieldName))
+				errs = append(errs, fmt.Errorf("capability %q requires output field %q", capability, fieldName))
 				continue
 			}
 			prop, found := schema.Properties[fieldName]
 			if !found || prop == nil {
-				errs = append(errs, fmt.Errorf("capability %q requires output field %q", cap, fieldName))
+				errs = append(errs, fmt.Errorf("capability %q requires output field %q", capability, fieldName))
 				continue
 			}
 			if prop.Type != expectedType {
-				errs = append(errs, fmt.Errorf("capability %q field %q must be type %q, got %q", cap, fieldName, expectedType, prop.Type))
+				errs = append(errs, fmt.Errorf("capability %q field %q must be type %q, got %q", capability, fieldName, expectedType, prop.Type))
 			}
 		}
 	}

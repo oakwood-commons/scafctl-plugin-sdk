@@ -131,7 +131,8 @@ older hosts), `oauth-helpers` serves its built-in neutral fallback pages.
   request instance-scoped tokens via
   `HostServiceClient.GetAuthTokenWithOptions(ctx, plugin.AuthTokenRequest{...})`
   (specifying `Hostname` and optional `Profile`), and `plugin.SecretRef`
-  supports `env://`, `file://`, and `secret://<name>` via
+  supports `env://`, `file://`, and `secret://<name>` (e.g.
+  `secret://deploy-token`, validated against host secret-store naming rules) via
   `ResolveWithHost(ctx, hostClient)`.
 
 ## Package Layout

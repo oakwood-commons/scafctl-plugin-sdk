@@ -806,7 +806,7 @@ type integrationHostService struct {
 }
 
 func (h *integrationHostService) GetSecret(_ context.Context, req *proto.GetSecretRequest) (*proto.GetSecretResponse, error) {
-	if req.Name == "github/pat" {
+	if req.Name == "github.pat" {
 		return &proto.GetSecretResponse{Value: "ghp_test_value", Found: true}, nil
 	}
 	return &proto.GetSecretResponse{Found: false}, nil
@@ -866,9 +866,13 @@ func TestIntegration_HostServiceRoundTrip(t *testing.T) {
 	require.NotNil(t, hostSvc.lastGroupsReq)
 	assert.Equal(t, "staging", hostSvc.lastGroupsReq.Profile)
 
-	secretVal, err := plugin.SecretRef("secret://github/pat").ResolveWithHost(ctx, hc)
+	secretVal, err := plugin.SecretRef("secret://github.pat").ResolveWithHost(ctx, hc)
 	require.NoError(t, err)
 	assert.Equal(t, "ghp_test_value", secretVal)
+
+	_, err = plugin.SecretRef("secret://github/pat").ResolveWithHost(ctx, hc)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "contains invalid characters")
 }
 
 // --- GRPCPlugin / AuthHandlerGRPCPlugin round-trip tests ---

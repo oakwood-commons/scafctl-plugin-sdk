@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"reflect"
 	"strings"
 )
@@ -25,6 +24,7 @@ const (
 	secretRefSchemeFile   = "file://"
 	secretRefSchemeSecret = "secret://"
 	reservedNamePrefix    = "scafctl."
+	maxSecretNameLength   = 255
 )
 
 // SecretGetter retrieves a named secret from a host or backing secret store.
@@ -48,29 +48,57 @@ func (s SecretRef) Validate() error {
 			return fmt.Errorf("file:// scheme requires a path")
 		}
 	case strings.HasPrefix(str, secretRefSchemeSecret):
-		name := strings.TrimPrefix(str, secretRefSchemeSecret)
-		trimmed := strings.TrimSpace(name)
-		if trimmed == "" {
-			return fmt.Errorf("secret:// scheme requires a secret name")
-		}
-		if strings.Contains(name, "..") {
-			return fmt.Errorf("secret:// name %q must not contain '..'", name)
-		}
-		normalized := strings.ReplaceAll(trimmed, "\\", "/")
-		stripped := strings.TrimLeft(normalized, "./")
-		if strings.HasPrefix(trimmed, reservedNamePrefix) || strings.HasPrefix(stripped, reservedNamePrefix) {
-			return fmt.Errorf("secret:// name %q must not start with reserved prefix %q", name, reservedNamePrefix)
-		}
-		if name != trimmed {
-			return fmt.Errorf("secret:// name %q must not have leading or trailing whitespace", name)
-		}
-		if stripped == "" || strings.Contains(name, "\\") || path.Clean(normalized) != normalized || strings.HasPrefix(normalized, "/") || strings.HasSuffix(normalized, "/") {
-			return fmt.Errorf("secret:// name %q must be a clean relative secret name", name)
-		}
+		return validateSecretName(strings.TrimPrefix(str, secretRefSchemeSecret))
 	default:
 		return fmt.Errorf("unsupported secret ref scheme %q, must start with env://, file://, or secret://", str)
 	}
 	return nil
+}
+
+// validateSecretName enforces the scafctl host secret-store naming rules plus
+// the SDK's reserved "scafctl." prefix guard:
+//   - Length 1..255 bytes
+//   - Must not start with '.' or '-'
+//   - Must not contain ".."
+//   - Must match ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,254}$
+//   - Must not start with "scafctl."
+func validateSecretName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return errors.New("secret:// scheme requires a secret name")
+	}
+	if len(name) > maxSecretNameLength {
+		return fmt.Errorf("secret:// name exceeds maximum length of %d bytes", maxSecretNameLength)
+	}
+	if name[0] == '.' || name[0] == '-' {
+		return fmt.Errorf("secret:// name %q must not start with '.' or '-'", name)
+	}
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("secret:// name %q must not contain '..'", name)
+	}
+	if !isValidSecretNameChars(name) {
+		return fmt.Errorf("secret:// name %q contains invalid characters; must match ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,254}$", name)
+	}
+	if strings.HasPrefix(name, reservedNamePrefix) {
+		return fmt.Errorf("secret:// name %q must not start with reserved prefix %q", name, reservedNamePrefix)
+	}
+	return nil
+}
+
+func isValidSecretNameChars(name string) bool {
+	if len(name) == 0 || !isASCIIAlnum(name[0]) {
+		return false
+	}
+	for i := 1; i < len(name); i++ {
+		b := name[i]
+		if !isASCIIAlnum(b) && b != '.' && b != '_' && b != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIIAlnum(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 // Resolve reads the secret value from a local source (env:// or file://).
