@@ -38,8 +38,11 @@ type LoginOptions struct {
 	Timeout  time.Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	// Hostname selects a specific instance (e.g. a cluster or server) for
 	// handlers that advertise CapHostname.
-	Hostname           string                                          `json:"hostname,omitempty" yaml:"hostname,omitempty"`
-	CallbackPort       int                                             `json:"callbackPort,omitempty" yaml:"callbackPort,omitempty"`
+	Hostname     string `json:"hostname,omitempty" yaml:"hostname,omitempty"`
+	CallbackPort int    `json:"callbackPort,omitempty" yaml:"callbackPort,omitempty"`
+	// Browser selects a preferred browser for interactive OAuth login flows.
+	// An empty string preserves the handler's default behavior.
+	Browser            string                                          `json:"browser,omitempty" yaml:"browser,omitempty"`
 	DeviceCodeCallback func(userCode, verificationURI, message string) `json:"-" yaml:"-"`
 }
 

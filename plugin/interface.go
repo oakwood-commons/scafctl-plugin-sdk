@@ -29,6 +29,23 @@ type ProviderConfig struct {
 	// handler configure path populates it (ConfigureAuthHandlerRequest);
 	// nil when the host did not advertise any.
 	HostCapabilities *HostCapabilities `json:"hostCapabilities,omitempty" yaml:"hostCapabilities,omitempty"`
+	// AuthCallbackPages carries optional pre-rendered success and failure HTML
+	// documents for interactive localhost OAuth callback servers. Populated only
+	// on the auth handler configure path; nil when unset or dropped by size bounds.
+	AuthCallbackPages *AuthCallbackPages `json:"authCallbackPages,omitempty" yaml:"authCallbackPages,omitempty"`
+}
+
+// MaxAuthCallbackPageBytes is the maximum size in bytes accepted for each
+// individual HTML document in AuthCallbackPages across the gRPC configure
+// boundary. Oversized documents are dropped so plugins fall back to neutral
+// helper defaults rather than serving truncated HTML.
+const MaxAuthCallbackPageBytes = 256 * 1024
+
+// AuthCallbackPages holds complete pre-rendered HTML documents for an auth
+// handler plugin's localhost OAuth callback server.
+type AuthCallbackPages struct {
+	SuccessHTML []byte `json:"successHtml,omitempty" yaml:"successHtml,omitempty"`
+	FailureHTML []byte `json:"failureHtml,omitempty" yaml:"failureHtml,omitempty"`
 }
 
 // HostCapabilities lists optional host features, advertised to auth handler
@@ -100,6 +117,12 @@ type LoginRequest struct {
 	// (1024-65535); the host is responsible for validating the value before
 	// sending it, and handlers should treat out-of-range values as unset.
 	CallbackPort int `json:"callbackPort,omitempty" yaml:"callbackPort,omitempty"`
+	// Browser selects a preferred browser for interactive OAuth login flows.
+	// An empty string preserves the handler's default behavior.
+	Browser string `json:"browser,omitempty" yaml:"browser,omitempty"`
+	// Settings carries optional per-call handler settings for the selected
+	// profile when supplied by the host on LoginRequest.
+	Settings map[string]json.RawMessage `json:"settings,omitempty" yaml:"settings,omitempty"`
 }
 
 // LoginResponse contains the result of a plugin Login call.
@@ -133,6 +156,9 @@ type TokenRequest struct {
 	// Hostname selects a specific instance (e.g. a cluster or server) for
 	// handlers that advertise auth.CapTokenHostname.
 	Hostname string `json:"hostname,omitempty" yaml:"hostname,omitempty"`
+	// Settings carries optional per-call handler settings for the selected
+	// profile when supplied by the host on GetTokenRequest.
+	Settings map[string]json.RawMessage `json:"settings,omitempty" yaml:"settings,omitempty"`
 }
 
 // TokenResponse contains the result of a plugin GetToken call.
@@ -151,6 +177,9 @@ type StatusRequest struct {
 	// Hostname selects a specific instance (e.g. a cluster or server) for
 	// handlers that advertise auth.CapInstanceHostname.
 	Hostname string `json:"hostname,omitempty" yaml:"hostname,omitempty"`
+	// Settings carries optional per-call handler settings for the selected
+	// profile when supplied by the host on GetStatusRequest.
+	Settings map[string]json.RawMessage `json:"settings,omitempty" yaml:"settings,omitempty"`
 }
 
 // LogoutRequest contains parameters for a plugin Logout call.
@@ -237,4 +266,11 @@ const (
 // transitioning into a long-lived server/daemon mode for issuing tokens.
 type ServerMode interface {
 	ActivateServerMode(ctx context.Context, settings json.RawMessage) error
+}
+
+// AuthGroupsProvider is an optional interface that AuthHandlerPlugin
+// implementations may satisfy to resolve group memberships (e.g. when OIDC
+// tokens omit groups due to claim overage).
+type AuthGroupsProvider interface {
+	GetGroups(ctx context.Context, handlerName string) ([]string, error)
 }

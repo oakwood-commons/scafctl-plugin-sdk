@@ -23,8 +23,11 @@ import (
 // fakeHostService is a minimal in-process HostService for testing.
 type fakeHostService struct {
 	proto.UnimplementedHostServiceServer
-	lastAuthTokenProfile string // captured from GetAuthToken requests
-	promptAuthErr        error  // when set, PromptAuthResponse returns this gRPC error
+	lastAuthTokenProfile string                      // captured from GetAuthToken requests
+	lastAuthTokenReq     *proto.GetAuthTokenRequest  // captured from GetAuthToken requests
+	lastAuthGroupsReq    *proto.GetAuthGroupsRequest // captured from GetAuthGroups requests
+	nilGroups            bool                        // when true, GetAuthGroups returns nil Groups slice
+	promptAuthErr        error                       // when set, PromptAuthResponse returns this gRPC error
 	lastPromptReq        *proto.PromptAuthResponseRequest
 }
 
@@ -72,6 +75,15 @@ func (f *fakeHostService) ListAuthHandlers(_ context.Context, _ *proto.ListAuthH
 
 func (f *fakeHostService) GetAuthToken(_ context.Context, req *proto.GetAuthTokenRequest) (*proto.GetAuthTokenResponse, error) {
 	f.lastAuthTokenProfile = req.Profile
+	reqCopy := proto.GetAuthTokenRequest{
+		HandlerName:        req.HandlerName,
+		Scope:              req.Scope,
+		MinValidForSeconds: req.MinValidForSeconds,
+		ForceRefresh:       req.ForceRefresh,
+		Profile:            req.Profile,
+		Hostname:           req.Hostname,
+	}
+	f.lastAuthTokenReq = &reqCopy
 	if req.HandlerName == "error" {
 		return &proto.GetAuthTokenResponse{Error: "token error"}, nil
 	}
@@ -79,8 +91,16 @@ func (f *fakeHostService) GetAuthToken(_ context.Context, req *proto.GetAuthToke
 }
 
 func (f *fakeHostService) GetAuthGroups(_ context.Context, req *proto.GetAuthGroupsRequest) (*proto.GetAuthGroupsResponse, error) {
+	reqCopy := proto.GetAuthGroupsRequest{
+		HandlerName: req.HandlerName,
+		Profile:     req.Profile,
+	}
+	f.lastAuthGroupsReq = &reqCopy
 	if req.HandlerName == "error" {
 		return &proto.GetAuthGroupsResponse{Error: "groups error"}, nil
+	}
+	if f.nilGroups {
+		return &proto.GetAuthGroupsResponse{}, nil
 	}
 	return &proto.GetAuthGroupsResponse{Groups: []string{"group-a", "group-b"}}, nil
 }
@@ -288,13 +308,101 @@ func TestHostServiceClient_GetAuthToken_ProfileFromContext(t *testing.T) {
 }
 
 func TestHostServiceClient_GetAuthGroups(t *testing.T) {
-	conn, cleanup := startFakeHostService(t)
+	fake, conn, cleanup := startFakeHostServiceWithFake(t)
 	defer cleanup()
+	c := NewHostServiceClient(conn)
+
+	ctx := auth.WithProfile(context.Background(), "corp")
+	groups, err := c.GetAuthGroups(ctx, "entra")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"group-a", "group-b"}, groups)
+	require.NotNil(t, fake.lastAuthGroupsReq)
+	assert.Equal(t, "entra", fake.lastAuthGroupsReq.HandlerName)
+	assert.Equal(t, "corp", fake.lastAuthGroupsReq.Profile)
+}
+
+func TestHostServiceClient_GetAuthGroups_NilGroupsNormalized(t *testing.T) {
+	fake, conn, cleanup := startFakeHostServiceWithFake(t)
+	defer cleanup()
+	fake.nilGroups = true
 	c := NewHostServiceClient(conn)
 
 	groups, err := c.GetAuthGroups(context.Background(), "entra")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"group-a", "group-b"}, groups)
+	assert.NotNil(t, groups)
+	assert.Empty(t, groups)
+}
+
+func TestHostServiceClient_GetAuthTokenWithOptions(t *testing.T) {
+	t.Run("explicit options including hostname and profile override", func(t *testing.T) {
+		fake, conn, cleanup := startFakeHostServiceWithFake(t)
+		defer cleanup()
+		c := NewHostServiceClient(conn)
+
+		ctx := auth.WithProfile(context.Background(), "ctx-profile")
+		resp, err := c.GetAuthTokenWithOptions(ctx, AuthTokenRequest{
+			Handler:            "github",
+			Scope:              "repo",
+			MinValidForSeconds: 120,
+			ForceRefresh:       true,
+			Profile:            "explicit-profile",
+			Hostname:           "ghe.corp.example.com",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "tok123", resp.AccessToken)
+		require.NotNil(t, fake.lastAuthTokenReq)
+		assert.Equal(t, "github", fake.lastAuthTokenReq.HandlerName)
+		assert.Equal(t, "repo", fake.lastAuthTokenReq.Scope)
+		assert.Equal(t, int64(120), fake.lastAuthTokenReq.MinValidForSeconds)
+		assert.True(t, fake.lastAuthTokenReq.ForceRefresh)
+		assert.Equal(t, "explicit-profile", fake.lastAuthTokenReq.Profile)
+		assert.Equal(t, "ghe.corp.example.com", fake.lastAuthTokenReq.Hostname)
+	})
+
+	t.Run("falls back to profile from context when opts.Profile is empty", func(t *testing.T) {
+		fake, conn, cleanup := startFakeHostServiceWithFake(t)
+		defer cleanup()
+		c := NewHostServiceClient(conn)
+
+		ctx := auth.WithProfile(context.Background(), "from-ctx")
+		resp, err := c.GetAuthTokenWithOptions(ctx, AuthTokenRequest{
+			Handler:  "openshift",
+			Hostname: "api.cluster-a.example.com:6443",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "tok123", resp.AccessToken)
+		require.NotNil(t, fake.lastAuthTokenReq)
+		assert.Equal(t, "from-ctx", fake.lastAuthTokenReq.Profile)
+		assert.Equal(t, "api.cluster-a.example.com:6443", fake.lastAuthTokenReq.Hostname)
+	})
+
+	t.Run("response error", func(t *testing.T) {
+		conn, cleanup := startFakeHostService(t)
+		defer cleanup()
+		c := NewHostServiceClient(conn)
+
+		_, err := c.GetAuthTokenWithOptions(context.Background(), AuthTokenRequest{Handler: "error"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "token error")
+	})
+
+	t.Run("grpc transport error", func(t *testing.T) {
+		lis, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		s := grpc.NewServer()
+		proto.RegisterHostServiceServer(s, &proto.UnimplementedHostServiceServer{})
+		go func() { _ = s.Serve(lis) }()
+		defer s.Stop()
+
+		conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+		require.NoError(t, err)
+		defer conn.Close()
+
+		c := NewHostServiceClient(conn)
+		_, err = c.GetAuthTokenWithOptions(context.Background(), AuthTokenRequest{Handler: "github"})
+		require.Error(t, err)
+		assert.True(t, IsUnimplemented(err))
+	})
 }
 
 func TestHostServiceClient_GetAuthGroups_Error(t *testing.T) {

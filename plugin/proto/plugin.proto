@@ -59,11 +59,11 @@ service HostService {
   // Plugins use this for authenticated HTTP requests and token refresh on 401.
   rpc GetAuthToken(GetAuthTokenRequest) returns (GetAuthTokenResponse);
   // GetAuthGroups retrieves group memberships for the authenticated user.
-  // Only handlers that implement group queries (e.g. Entra) will return
-  // groups. If the selected handler does not support group queries, the host
-  // must return a successful GetAuthGroupsResponse with an empty groups list
-  // and no application error, rather than surfacing a gRPC Unimplemented
-  // error.
+  // Entries may be group IDs/ObjectIDs or names depending on the handler.
+  // If the selected handler does not support group queries, the host returns
+  // a GetAuthGroupsResponse with a non-empty error field (which
+  // HostServiceClient.GetAuthGroups surfaces as an error). Older hosts that
+  // predate this RPC return gRPC Unimplemented.
   rpc GetAuthGroups(GetAuthGroupsRequest) returns (GetAuthGroupsResponse);
 
   // PromptAuthResponse asks the host to prompt the user for the redirect URL
@@ -125,6 +125,11 @@ service AuthHandlerService {
 
   // ActivateServerMode transitions the handler into server mode for token serving.
   rpc ActivateServerMode(ActivateServerModeRequest) returns (ActivateServerModeResponse);
+
+  // GetGroups resolves group memberships for the authenticated identity of the
+  // named handler (e.g. when OIDC tokens omit groups due to claim overage).
+  // Plugins that do not implement AuthGroupsProvider return gRPC Unimplemented.
+  rpc GetGroups(GetGroupsRequest) returns (GetGroupsResponse);
 }
 
 message ActivateServerModeRequest {
@@ -383,6 +388,15 @@ message LoginRequest {
   // When set it is expected to be an unprivileged, in-range TCP port
   // (1024-65535); the host validates the value before sending it.
   int32 callback_port = 8;
+  // browser selects a preferred browser (e.g. "chrome", "edge", "firefox",
+  // "system") or executable hint for interactive OAuth flows. Empty preserves
+  // the handler's default browser-opening behavior. Additive: older hosts omit it.
+  string browser = 9;
+  // settings carries optional JSON-encoded per-call handler settings for the
+  // selected profile so pooled/long-lived auth handler plugins can operate
+  // statelessly across profiles without relying solely on ConfigureAuthHandler.
+  // Additive: older hosts omit it.
+  bytes settings = 10;
 }
 
 message LoginStreamMessage {
@@ -433,6 +447,9 @@ message GetStatusRequest {
   // hostname selects a specific instance (e.g. a cluster or server) for
   // handlers that advertise the instance_hostname capability.
   string hostname = 3;
+  // settings carries optional JSON-encoded per-call handler settings for the
+  // selected profile. Additive: older hosts omit it.
+  bytes settings = 4;
 }
 
 message GetStatusResponse {
@@ -465,6 +482,9 @@ message GetTokenRequest {
   // hostname selects a specific instance (e.g. a cluster or server) for
   // handlers that advertise the token_hostname capability.
   string hostname = 9;
+  // settings carries optional JSON-encoded per-call handler settings for the
+  // selected profile. Additive: older hosts omit it.
+  bytes settings = 10;
 }
 
 message GetTokenResponse {
@@ -527,6 +547,10 @@ message ConfigureAuthHandlerRequest {
   // prompt the user), so the host states its support here once. Additive:
   // older hosts omit the field.
   HostCapabilities host_capabilities = 9;
+  // auth_callback_pages carries optional pre-rendered HTML documents for the
+  // plugin's localhost OAuth callback server (success and failure outcomes).
+  // Additive: older hosts omit the field and older plugins ignore it.
+  AuthCallbackPages auth_callback_pages = 10;
 }
 
 message ConfigureAuthHandlerResponse {
@@ -547,6 +571,13 @@ message HostCapabilities {
   bool prompt_auth_response = 1;
 }
 
+// AuthCallbackPages carries complete pre-rendered HTML documents for a
+// plugin's localhost OAuth callback server.
+message AuthCallbackPages {
+  bytes success_html = 1;
+  bytes failure_html = 2;
+}
+
 message StopAuthHandlerRequest {
   string handler_name = 1;
 }
@@ -557,6 +588,10 @@ message StopAuthHandlerResponse {
 
 message DetectAvailableFlowsRequest {
   string handler_name = 1;
+  string profile = 2;
+  // settings carries optional JSON-encoded per-call handler settings for the
+  // selected profile. Additive: older hosts omit it.
+  bytes settings = 3;
 }
 
 message DetectAvailableFlowsResponse {
@@ -568,6 +603,19 @@ message FlowAvailability {
   string flow = 1;
   bool available = 2;
   string reason = 3;
+}
+
+message GetGroupsRequest {
+  string handler_name = 1;
+  string profile = 2;
+  // settings carries optional JSON-encoded per-call handler settings for the
+  // selected profile. Additive: older hosts omit it.
+  bytes settings = 3;
+}
+
+message GetGroupsResponse {
+  repeated string groups = 1;
+  string error = 2;
 }
 
 // ---- Host Service Messages (plugin → host callbacks) ----
@@ -631,6 +679,9 @@ message GetAuthTokenRequest {
   int64 min_valid_for_seconds = 3;
   bool force_refresh = 4;
   string profile = 5;
+  // hostname selects a specific instance (e.g. a cluster or server) for
+  // handlers that advertise the token_hostname capability.
+  string hostname = 6;
 }
 
 message GetAuthTokenResponse {
@@ -643,13 +694,16 @@ message GetAuthTokenResponse {
 
 message GetAuthGroupsRequest {
   string handler_name = 1;
+  string profile = 2;
 }
 
 message GetAuthGroupsResponse {
-  // groups contains the group names for the authenticated identity. Entries
-  // are names (not IDs or email addresses), ordering is not guaranteed, and
-  // duplicates should not be returned.
+  // groups contains the group memberships for the authenticated identity.
+  // Entries may be group IDs/ObjectIDs or names depending on the handler;
+  // ordering is not guaranteed, and duplicates should not be returned.
   repeated string groups = 1;
+  // error carries application or handler errors, including when the selected
+  // handler does not support group queries.
   string error = 2;
 }
 

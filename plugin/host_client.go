@@ -97,14 +97,51 @@ func (c *HostServiceClient) ListAuthHandlers(ctx context.Context) (handlers []st
 	return resp.HandlerNames, resp.DefaultHandler, nil
 }
 
+// AuthTokenRequest configures a HostServiceClient.GetAuthTokenWithOptions call.
+type AuthTokenRequest struct {
+	// Handler names the auth handler to request a token from.
+	Handler string `json:"handler" yaml:"handler"`
+	// Scope specifies the requested OAuth scope, if applicable.
+	Scope string `json:"scope,omitempty" yaml:"scope,omitempty"`
+	// MinValidForSeconds is the minimum remaining validity required before
+	// triggering a refresh.
+	MinValidForSeconds int64 `json:"minValidForSeconds,omitempty" yaml:"minValidForSeconds,omitempty"`
+	// ForceRefresh bypasses cached access tokens and forces a fresh token acquisition.
+	ForceRefresh bool `json:"forceRefresh,omitempty" yaml:"forceRefresh,omitempty"`
+	// Profile selects the auth profile. When empty, GetAuthTokenWithOptions falls
+	// back to auth.ProfileFromContext(ctx).
+	Profile string `json:"profile,omitempty" yaml:"profile,omitempty"`
+	// Hostname selects a specific instance (e.g. a cluster or server) for
+	// handlers that advertise auth.CapTokenHostname.
+	Hostname string `json:"hostname,omitempty" yaml:"hostname,omitempty"`
+}
+
 // GetAuthToken retrieves a valid access token from the host's auth registry.
 func (c *HostServiceClient) GetAuthToken(ctx context.Context, handler, scope string, minValidFor int64, forceRefresh bool) (*proto.GetAuthTokenResponse, error) {
-	resp, err := c.client.GetAuthToken(ctx, &proto.GetAuthTokenRequest{
-		HandlerName:        handler,
+	return c.GetAuthTokenWithOptions(ctx, AuthTokenRequest{
+		Handler:            handler,
 		Scope:              scope,
 		MinValidForSeconds: minValidFor,
 		ForceRefresh:       forceRefresh,
-		Profile:            auth.ProfileFromContext(ctx),
+	})
+}
+
+// GetAuthTokenWithOptions retrieves a valid access token from the host's auth
+// registry using structured options, including optional per-instance Hostname
+// and explicit Profile override (falling back to auth.ProfileFromContext(ctx)
+// when opts.Profile is empty).
+func (c *HostServiceClient) GetAuthTokenWithOptions(ctx context.Context, opts AuthTokenRequest) (*proto.GetAuthTokenResponse, error) {
+	profile := opts.Profile
+	if profile == "" {
+		profile = auth.ProfileFromContext(ctx)
+	}
+	resp, err := c.client.GetAuthToken(ctx, &proto.GetAuthTokenRequest{
+		HandlerName:        opts.Handler,
+		Scope:              opts.Scope,
+		MinValidForSeconds: opts.MinValidForSeconds,
+		ForceRefresh:       opts.ForceRefresh,
+		Profile:            profile,
+		Hostname:           opts.Hostname,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("host GetAuthToken: %w", err)
@@ -116,15 +153,19 @@ func (c *HostServiceClient) GetAuthToken(ctx context.Context, handler, scope str
 }
 
 // GetAuthGroups retrieves group memberships for the authenticated user from
-// the host's auth registry. Handlers that implement group queries (e.g.
-// Entra) may return memberships. If the selected handler does not support
-// group queries, this method returns an empty slice and a nil error.
+// the host's auth registry, forwarding the active profile from ctx. Entries
+// may be group IDs/ObjectIDs or names depending on the handler. If the
+// selected handler does not support group queries, the host populates
+// GetAuthGroupsResponse.error and this method returns that error. Older hosts
+// that do not implement the GetAuthGroups RPC (gRPC Unimplemented) return an
+// empty slice and a nil error.
 func (c *HostServiceClient) GetAuthGroups(ctx context.Context, handler string) ([]string, error) {
 	resp, err := c.client.GetAuthGroups(ctx, &proto.GetAuthGroupsRequest{
 		HandlerName: handler,
+		Profile:     auth.ProfileFromContext(ctx),
 	})
 	if err != nil {
-		if status.Code(err) == codes.Unimplemented {
+		if IsUnimplemented(err) {
 			return []string{}, nil
 		}
 		return nil, fmt.Errorf("host GetAuthGroups: %w", err)
