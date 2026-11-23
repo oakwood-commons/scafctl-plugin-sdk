@@ -1,5 +1,9 @@
 # scafctl-plugin-sdk - AI Agent Instructions
 
+<!-- copilot-review:start -->
+For pull request code review, follow the review contract in [`REVIEW.md`](../REVIEW.md) at the repo root. It is the single source of truth; do not duplicate it here.
+<!-- copilot-review:end -->
+
 ## Overview
 Go SDK providing shared types, interfaces, and gRPC contracts for scafctl plugins. Plugin authors import this module instead of the full scafctl module.
 
@@ -39,7 +43,3 @@ go vet ./...
 - **Proto ownership**: `plugin.proto` lives here. scafctl imports the generated code from this module
 - **Test coverage**: Every new or changed file must have tests. Target 70%+ patch coverage
 - **Git safety**: Never run `git commit`, `git push`, or `git commit --amend` unless the user explicitly asks
-
-<!-- copilot-review:start -->
-For pull request code review, follow the review contract in [`REVIEW.md`](../REVIEW.md) at the repo root. It is the single source of truth; do not duplicate it here.
-<!-- copilot-review:end -->
