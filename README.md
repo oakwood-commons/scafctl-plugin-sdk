@@ -135,11 +135,45 @@ older hosts), `oauth-helpers` serves its built-in neutral fallback pages.
   `secret://deploy-token`, validated against host secret-store naming rules) via
   `ResolveWithHost(ctx, hostClient)`.
 
+### Host Secret-Store Helpers and Contract Testing (`plugintest`)
+
+- **Secret-name validation (`plugin.ValidateHostSecretName`)**: Validates secret
+  names against the `HostService` gRPC handler contract
+  (`1..plugin.MaxHostSecretNameLength` bytes, `^[a-zA-Z0-9_\-./]+$`, and no
+  `".."` sequences; characters such as `:` are rejected). Note that the host's
+  encrypted backing secret store further requires `1..255` bytes matching
+  `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,254}$` (no `/` and no leading `.`, `-`, or `_`),
+  and user-authored `secret://<name>` references validated by
+  `SecretRef.Validate` also reject the reserved `"scafctl."` prefix.
+- **Safe prefix enumeration (`HostServiceClient.ListSecretsByPrefix`)**:
+  `HostServiceClient.ListSecrets(ctx, pattern)` evaluates `pattern` as an
+  unanchored Go regular expression (`regexp.Compile`, max
+  `plugin.MaxHostSecretPatternLength` bytes), not a shell glob. Use
+  `hostClient.ListSecretsByPrefix(ctx, "scafctl.auth.myhandler.token.")` to
+  escape regular-expression metacharacters automatically and filter returned
+  names by literal prefix.
+- **In-memory host test double (`plugintest.NewFakeHostClient`)**: Spins up a
+  concurrency-safe `plugintest.FakeHostService` over `bufconn` that enforces
+  both RPC-level and backing-store secret-name validation, regular-expression
+  `ListSecrets`, read-only mode, and allowed/denied secret prefixes in plugin
+  unit tests:
+
+~~~go
+client, fake := plugintest.NewFakeHostClient(t,
+    plugintest.WithInitialSecrets(map[string]string{
+        "scafctl.auth.myhandler.token.default": "tok-123",
+    }),
+    plugintest.WithAllowedSecretPrefix("scafctl.auth.myhandler."),
+)
+names, err := client.ListSecretsByPrefix(ctx, "scafctl.auth.myhandler.token.")
+~~~
+
 ## Package Layout
 
 | Package | Purpose |
 |---------|---------|
 | `plugin/` | Core plugin framework: interfaces, gRPC wiring, `Serve()` / `ServeAuthHandler()` entry points |
+| `plugintest/` | In-memory `FakeHostService` and `NewFakeHostClient` for host callback contract testing |
 | `provider/` | Provider types: `Descriptor`, `OperationDescriptor`, `Output`, `Capability`, context helpers |
 | `provider/schemahelper/` | JSON Schema builder helpers for provider input schemas |
 | `auth/` | Auth handler types: `Flow`, `Claims`, `Token`, `Status`, capabilities |

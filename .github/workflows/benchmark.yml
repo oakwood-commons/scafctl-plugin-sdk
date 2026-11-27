@@ -93,11 +93,23 @@ jobs:
       - name: Run benchmarks on base branch
         if: steps.find-bench.outputs.packages != ''
         run: |
-          go test -run='^$' -bench='.' -benchmem \
-            -benchtime="${BENCH_TIME}" -count="${BENCH_COUNT}" \
-            -timeout=20m \
-            -short \
-            ${{ steps.find-bench.outputs.packages }} | tee base-bench.txt
+          BASE_PKGS=""
+          for pkg in ${{ steps.find-bench.outputs.packages }}; do
+            if [ -d "$pkg" ] && grep -rl --include='*_test.go' 'func Benchmark' "$pkg" >/dev/null 2>&1; then
+              BASE_PKGS="$BASE_PKGS $pkg"
+            fi
+          done
+          BASE_PKGS=$(echo "$BASE_PKGS" | xargs)
+          if [ -z "$BASE_PKGS" ]; then
+            echo "No matching benchmark packages exist on base branch; creating empty baseline."
+            : > base-bench.txt
+          else
+            go test -run='^$' -bench='.' -benchmem \
+              -benchtime="${BENCH_TIME}" -count="${BENCH_COUNT}" \
+              -timeout=20m \
+              -short \
+              $BASE_PKGS | tee base-bench.txt
+          fi
 
       - name: Compare benchmarks
         if: steps.find-bench.outputs.packages != ''

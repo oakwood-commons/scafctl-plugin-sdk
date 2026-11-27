@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/oakwood-commons/scafctl-plugin-sdk/auth"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/plugin"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/plugin/proto"
+	"github.com/oakwood-commons/scafctl-plugin-sdk/plugintest"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/provider"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/provider/schemahelper"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/testutil"
@@ -873,6 +875,62 @@ func TestIntegration_HostServiceRoundTrip(t *testing.T) {
 	_, err = plugin.SecretRef("secret://github/pat").ResolveWithHost(ctx, hc)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "contains invalid characters")
+}
+
+func TestIntegration_FakeHostServiceContract(t *testing.T) {
+	t.Parallel()
+	ctx := auth.WithProfile(context.Background(), "work")
+
+	hc, fake := plugintest.NewFakeHostClient(t,
+		plugintest.WithInitialSecrets(map[string]string{
+			"deploy-token":                        "secret-deploy",
+			"scafctl.auth.github.token.default":   "gho_default",
+			"scafctl.auth.github.token.work":      "gho_work",
+			"scafctl_auth_github_token_unrelated": "other",
+		}),
+		plugintest.WithAllowedSecretPrefix("scafctl.auth.github."),
+		plugintest.WithAuthTokenFunc(func(_ context.Context, req *proto.GetAuthTokenRequest) (*proto.GetAuthTokenResponse, error) {
+			return &proto.GetAuthTokenResponse{
+				AccessToken: "tok-" + req.GetProfile(),
+				TokenType:   "Bearer",
+			}, nil
+		}),
+	)
+
+	require.NoError(t, plugin.ValidateHostSecretName("scafctl.auth.github.token.work"))
+	require.Error(t, plugin.ValidateHostSecretName("scafctl.auth.github.token:work"))
+
+	// Colon-delimited key fails host secret validation over gRPC.
+	err := hc.SetSecret(ctx, "scafctl.auth.github.token:work", "bad")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "secret name contains invalid characters")
+
+	// Prefix outside AllowedSecretPrefix is denied, while in-scope writes succeed.
+	_, _, err = hc.GetSecret(ctx, "deploy-token")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outside allowed scope")
+
+	longPrefix := "scafctl.auth.github." + strings.Repeat("sub.", 50)
+	require.NoError(t, hc.SetSecret(ctx, longPrefix+"leaf", "leaf-val"))
+	gotVal, ok := fake.Secret(longPrefix + "leaf")
+	require.True(t, ok)
+	assert.Equal(t, "leaf-val", gotVal)
+
+	// ListSecretsByPrefix escapes '.' metacharacters and handles QuoteMeta expansion > 256 bytes.
+	keys, err := hc.ListSecretsByPrefix(ctx, "scafctl.auth.github.token.")
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"scafctl.auth.github.token.default",
+		"scafctl.auth.github.token.work",
+	}, keys)
+
+	longKeys, err := hc.ListSecretsByPrefix(ctx, longPrefix)
+	require.NoError(t, err)
+	assert.Equal(t, []string{longPrefix + "leaf"}, longKeys)
+
+	tok, err := hc.GetAuthToken(ctx, "github", "repo", 30, false)
+	require.NoError(t, err)
+	assert.Equal(t, "tok-work", tok.GetAccessToken())
 }
 
 // --- GRPCPlugin / AuthHandlerGRPCPlugin round-trip tests ---

@@ -12,6 +12,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/plugin/proto"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/provider"
+	"google.golang.org/grpc"
 )
 
 // ---- Descriptor conversion benchmarks ----
@@ -302,4 +303,42 @@ func (m *benchMockProvider) ExtractDependencies(_ context.Context, _ string, _ m
 
 func (m *benchMockProvider) StopProvider(_ context.Context, _ string) error {
 	return nil
+}
+
+// ---- Host secret helper benchmarks ----
+
+func BenchmarkValidateHostSecretName(b *testing.B) {
+	name := "scafctl.auth.github.token.default.github.com"
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_ = ValidateHostSecretName(name)
+	}
+}
+
+type benchHostServiceClient struct {
+	proto.HostServiceClient
+	names []string
+}
+
+func (c *benchHostServiceClient) ListSecrets(_ context.Context, _ *proto.ListSecretsRequest, _ ...grpc.CallOption) (*proto.ListSecretsResponse, error) {
+	return &proto.ListSecretsResponse{Names: c.names}, nil
+}
+
+func BenchmarkListSecretsByPrefix(b *testing.B) {
+	hc := &HostServiceClient{
+		client: &benchHostServiceClient{
+			names: []string{
+				"scafctl.auth.github.token.default",
+				"scafctl.auth.github.token.work",
+				"scafctl.auth.entra.token.default",
+			},
+		},
+	}
+	ctx := context.Background()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_, _ = hc.ListSecretsByPrefix(ctx, "scafctl.auth.github.token.")
+	}
 }

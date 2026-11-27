@@ -10,6 +10,7 @@ Go SDK providing shared types, interfaces, and gRPC contracts for scafctl plugin
 ## Key Packages
 
 - **plugin/**: Plugin interfaces (`ProviderPlugin`, `AuthHandlerPlugin`), gRPC server, `Serve()` helpers, host client
+- **plugintest/**: In-memory `FakeHostService` and `NewFakeHostClient` for host callback contract tests
 - **provider/**: `Provider`, `Descriptor`, `Output`, `Capability`, context helpers, validation
 - **provider/schemahelper/**: JSON Schema helpers (`StringProp`, `IntProp`, `ObjectSchema`)
 - **auth/**: Auth types (`Capability`, `Flow`, `Claims`, `Token`, `HandlerMetadata`, handler types)
