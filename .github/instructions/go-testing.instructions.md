@@ -30,7 +30,7 @@ go test -cover ./...
 | Code Type | Target |
 |-----------|--------|
 | Core packages (`plugin/`, `provider/`, `auth/`) | 80%+ |
-| Helpers (`schemahelper/`, `testutil/`) | 70%+ |
+| Helpers (`schemahelper/`, `testutil/`, `plugintest/`) | 70%+ |
 | Generated code (`proto/`) | Exclude |
 
 ### Patch Coverage (CRITICAL)

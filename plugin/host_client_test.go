@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/oakwood-commons/scafctl-plugin-sdk/auth"
@@ -29,6 +31,9 @@ type fakeHostService struct {
 	nilGroups            bool                        // when true, GetAuthGroups returns nil Groups slice
 	promptAuthErr        error                       // when set, PromptAuthResponse returns this gRPC error
 	lastPromptReq        *proto.PromptAuthResponseRequest
+	lastListPattern      string
+	listCalls            int
+	listNames            []string
 }
 
 func (f *fakeHostService) GetSecret(_ context.Context, req *proto.GetSecretRequest) (*proto.GetSecretResponse, error) {
@@ -56,8 +61,13 @@ func (f *fakeHostService) DeleteSecret(_ context.Context, req *proto.DeleteSecre
 }
 
 func (f *fakeHostService) ListSecrets(_ context.Context, req *proto.ListSecretsRequest) (*proto.ListSecretsResponse, error) {
-	if req.Pattern == "error" {
+	f.listCalls++
+	f.lastListPattern = req.Pattern
+	if req.Pattern == "error" || req.Pattern == "^error" {
 		return &proto.ListSecretsResponse{Error: "list error"}, nil
+	}
+	if f.listNames != nil {
+		return &proto.ListSecretsResponse{Names: f.listNames}, nil
 	}
 	return &proto.ListSecretsResponse{Names: []string{"key1", "key2"}}, nil
 }
@@ -512,4 +522,187 @@ func TestIsUnimplemented(t *testing.T) {
 			assert.Equal(t, tt.want, IsUnimplemented(tt.err))
 		})
 	}
+}
+
+func TestValidateHostSecretName(t *testing.T) {
+	t.Parallel()
+	hostRegex := regexp.MustCompile(`\A[a-zA-Z0-9_\-./]+\z`)
+
+	tests := []struct {
+		name    string
+		input   string
+		wantErr string
+	}{
+		{name: "simple name", input: "my-secret"},
+		{name: "auth handler internal prefix", input: "scafctl.auth.github.token.default"},
+		{name: "slash separated namespace", input: "scafctl.auth.entra/work/refresh_token"},
+		{name: "single character", input: "a"},
+		{name: "leading dot", input: ".token"},
+		{name: "leading dash", input: "-token"},
+		{name: "leading slash", input: "/token"},
+		{name: "max length 256", input: strings.Repeat("a", MaxHostSecretNameLength)},
+		{name: "empty", input: "", wantErr: "secret name must not be empty"},
+		{name: "exceeds max length 257", input: strings.Repeat("a", MaxHostSecretNameLength+1), wantErr: "secret name exceeds maximum length of 256"},
+		{name: "colon rejected", input: "scafctl.auth.github.token:github.com", wantErr: "secret name contains invalid characters"},
+		{name: "glob star rejected", input: "scafctl.auth.github.*", wantErr: "secret name contains invalid characters"},
+		{name: "whitespace rejected", input: "my secret", wantErr: "secret name contains invalid characters"},
+		{name: "backslash rejected", input: `org\token`, wantErr: "secret name contains invalid characters"},
+		{name: "embedded newline rejected", input: "foo\nbar", wantErr: "secret name contains invalid characters"},
+		{name: "trailing newline rejected", input: "foo\n", wantErr: "secret name contains invalid characters"},
+		{name: "unicode digit rejected", input: "token\u0661", wantErr: "secret name contains invalid characters"},
+		{name: "invalid utf8 rejected", input: "token\xff", wantErr: "secret name contains invalid characters"},
+		{name: "path traversal prefix", input: "../etc/passwd", wantErr: "secret name must not contain path traversal sequences"},
+		{name: "embedded double dot", input: "scafctl..token", wantErr: "secret name must not contain path traversal sequences"},
+		{name: "bare double dot", input: "..", wantErr: "secret name must not contain path traversal sequences"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateHostSecretName(tt.input)
+			refValid := tt.input != "" &&
+				len(tt.input) <= MaxHostSecretNameLength &&
+				hostRegex.MatchString(tt.input) &&
+				!strings.Contains(tt.input, "..")
+			assert.Equal(t, refValid, err == nil, "ValidateHostSecretName(%q) parity with host regex", tt.input)
+
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestHostServiceClient_ListSecretsByPrefix(t *testing.T) {
+	t.Parallel()
+
+	t.Run("escapes regex metacharacters and filters returned names", func(t *testing.T) {
+		t.Parallel()
+		fake, conn, cleanup := startFakeHostServiceWithFake(t)
+		defer cleanup()
+		// Include non-matching names to verify client-side strings.HasPrefix defense in depth.
+		fake.listNames = []string{
+			"scafctl.auth.github.token.default",
+			"scafctl.auth.github.token.work",
+			"scafctl_auth_github_token_other",
+			"other.scafctl.auth.github.token.default",
+		}
+		c := NewHostServiceClient(conn)
+
+		got, err := c.ListSecretsByPrefix(context.Background(), "scafctl.auth.github.token.")
+		require.NoError(t, err)
+		assert.Equal(t, `^scafctl\.auth\.github\.token\.`, fake.lastListPattern)
+		assert.Equal(t, []string{
+			"scafctl.auth.github.token.default",
+			"scafctl.auth.github.token.work",
+		}, got)
+	})
+
+	t.Run("empty prefix sends empty pattern and returns all names", func(t *testing.T) {
+		t.Parallel()
+		fake, conn, cleanup := startFakeHostServiceWithFake(t)
+		defer cleanup()
+		c := NewHostServiceClient(conn)
+
+		got, err := c.ListSecretsByPrefix(context.Background(), "")
+		require.NoError(t, err)
+		assert.Equal(t, "", fake.lastListPattern)
+		assert.Equal(t, []string{"key1", "key2"}, got)
+	})
+
+	t.Run("returns non-nil empty slice when nothing matches", func(t *testing.T) {
+		t.Parallel()
+		fake, conn, cleanup := startFakeHostServiceWithFake(t)
+		defer cleanup()
+		fake.listNames = []string{"unrelated"}
+		c := NewHostServiceClient(conn)
+
+		got, err := c.ListSecretsByPrefix(context.Background(), "scafctl.auth.")
+		require.NoError(t, err)
+		assert.NotNil(t, got)
+		assert.Empty(t, got)
+	})
+
+	t.Run("allows exact MaxHostSecretPatternLength escaped pattern", func(t *testing.T) {
+		t.Parallel()
+		fake, conn, cleanup := startFakeHostServiceWithFake(t)
+		defer cleanup()
+		c := NewHostServiceClient(conn)
+
+		// "^" (1 byte) + 255 plain characters = 256 bytes.
+		prefix := strings.Repeat("a", MaxHostSecretPatternLength-1)
+		_, err := c.ListSecretsByPrefix(context.Background(), prefix)
+		require.NoError(t, err)
+		assert.Equal(t, 1, fake.listCalls)
+		assert.Len(t, fake.lastListPattern, MaxHostSecretPatternLength)
+	})
+
+	t.Run("bounds escaped regex hint when valid prefix expands past MaxHostSecretPatternLength", func(t *testing.T) {
+		t.Parallel()
+		fake, conn, cleanup := startFakeHostServiceWithFake(t)
+		defer cleanup()
+
+		// 240-byte prefix with 24 dots: valid secret prefix (<= 256 bytes), but
+		// "^" + QuoteMeta(prefix) is 265 bytes (> 256).
+		prefix := strings.Repeat("abcdefgh.", 24) + strings.Repeat("x", 24)
+		require.LessOrEqual(t, len(prefix), MaxHostSecretNameLength)
+
+		exactMatch := prefix + "tok"
+		nearMiss := prefix[:len(prefix)-1] + "ytok"
+		fake.listNames = []string{exactMatch, nearMiss}
+
+		c := NewHostServiceClient(conn)
+		got, err := c.ListSecretsByPrefix(context.Background(), prefix)
+		require.NoError(t, err)
+		assert.Equal(t, 1, fake.listCalls)
+		assert.LessOrEqual(t, len(fake.lastListPattern), MaxHostSecretPatternLength)
+		_, compileErr := regexp.Compile(fake.lastListPattern)
+		require.NoError(t, compileErr)
+		assert.Equal(t, []string{exactMatch}, got)
+	})
+
+	t.Run("handles 256-byte prefix and invalid UTF-8 fallback", func(t *testing.T) {
+		t.Parallel()
+		fake, conn, cleanup := startFakeHostServiceWithFake(t)
+		defer cleanup()
+
+		maxPrefix := strings.Repeat("a", MaxHostSecretNameLength)
+		fake.listNames = []string{maxPrefix, strings.Repeat("a", MaxHostSecretNameLength-1) + "b"}
+		c := NewHostServiceClient(conn)
+
+		got, err := c.ListSecretsByPrefix(context.Background(), maxPrefix)
+		require.NoError(t, err)
+		assert.Len(t, fake.lastListPattern, MaxHostSecretPatternLength)
+		assert.Equal(t, []string{maxPrefix}, got)
+
+		// Leading invalid UTF-8 when expansion exceeds limit falls back to empty pattern + HasPrefix filter.
+		assert.Equal(t, "", escapedPrefixPattern("\xff"+strings.Repeat(".", 130)))
+	})
+
+	t.Run("fails fast before RPC when prefix exceeds MaxHostSecretNameLength", func(t *testing.T) {
+		t.Parallel()
+		fake, conn, cleanup := startFakeHostServiceWithFake(t)
+		defer cleanup()
+		c := NewHostServiceClient(conn)
+
+		tooLongPrefix := strings.Repeat("a", MaxHostSecretNameLength+1)
+		_, err := c.ListSecretsByPrefix(context.Background(), tooLongPrefix)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "exceeds maximum of 256 bytes")
+		assert.Equal(t, 0, fake.listCalls)
+	})
+
+	t.Run("propagates ListSecrets error", func(t *testing.T) {
+		t.Parallel()
+		_, conn, cleanup := startFakeHostServiceWithFake(t)
+		defer cleanup()
+		c := NewHostServiceClient(conn)
+
+		_, err := c.ListSecretsByPrefix(context.Background(), "error")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "list error")
+	})
 }

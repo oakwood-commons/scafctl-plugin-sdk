@@ -7,6 +7,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/oakwood-commons/scafctl-plugin-sdk/auth"
 	"github.com/oakwood-commons/scafctl-plugin-sdk/plugin/proto"
@@ -14,6 +17,59 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+const (
+	// MaxHostSecretNameLength is the maximum allowed byte length for a secret
+	// name passed to HostService GetSecret, SetSecret, and DeleteSecret RPCs.
+	MaxHostSecretNameLength = 256
+
+	// MaxHostSecretPatternLength is the maximum allowed byte length for a regular
+	// expression pattern passed to HostService ListSecrets RPCs.
+	MaxHostSecretPatternLength = 256
+)
+
+// ValidateHostSecretName checks that name satisfies the host secret-store
+// RPC naming contract enforced by HostService GetSecret, SetSecret, and
+// DeleteSecret handlers:
+//   - Non-empty and at most MaxHostSecretNameLength (256) bytes
+//   - Contains only ASCII alphanumeric characters, '_', '-', '.', and '/'
+//     (matching ^[a-zA-Z0-9_\-./]+$; characters such as ':' are rejected)
+//   - Does not contain ".." path traversal sequences
+//
+// Note: the host's encrypted backing secret store further requires names to be
+// 1..255 bytes, start with an ASCII alphanumeric character, and contain only
+// ASCII alphanumeric characters, '.', '_', or '-' (no '/'). User-authored
+// secret://<name> references validated by SecretRef.Validate also reject the
+// reserved "scafctl." prefix, whereas auth handler plugins may store internal
+// credentials under prefixes such as "scafctl.auth.<handler>.".
+func ValidateHostSecretName(name string) error {
+	if name == "" {
+		return errors.New("secret name must not be empty")
+	}
+	if len(name) > MaxHostSecretNameLength {
+		return fmt.Errorf("secret name exceeds maximum length of %d", MaxHostSecretNameLength)
+	}
+	if !isValidHostSecretNameChars(name) {
+		return errors.New("secret name contains invalid characters")
+	}
+	if strings.Contains(name, "..") {
+		return errors.New("secret name must not contain path traversal sequences")
+	}
+	return nil
+}
+
+func isValidHostSecretNameChars(name string) bool {
+	if len(name) == 0 {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		b := name[i]
+		if !isASCIIAlnum(b) && b != '_' && b != '-' && b != '.' && b != '/' {
+			return false
+		}
+	}
+	return true
+}
 
 // HostServiceClient wraps the HostService gRPC client (used by plugins).
 type HostServiceClient struct {
@@ -26,6 +82,12 @@ func NewHostServiceClient(conn *grpc.ClientConn) *HostServiceClient {
 }
 
 // GetSecret retrieves a secret from the host's secret store.
+//
+// The host validates name at the RPC layer with ValidateHostSecretName and at
+// the backing store layer (1..255 bytes, leading ASCII alphanumeric, and only
+// ASCII alphanumeric, '.', '_', or '-'), while enforcing any plugin-specific
+// prefix restrictions. When the secret does not exist, GetSecret returns
+// ("", false, nil).
 func (c *HostServiceClient) GetSecret(ctx context.Context, name string) (string, bool, error) {
 	resp, err := c.client.GetSecret(ctx, &proto.GetSecretRequest{Name: name})
 	if err != nil {
@@ -38,6 +100,11 @@ func (c *HostServiceClient) GetSecret(ctx context.Context, name string) (string,
 }
 
 // SetSecret stores a secret in the host's secret store.
+//
+// The host validates name at the RPC layer with ValidateHostSecretName and at
+// the backing store layer (1..255 bytes, leading ASCII alphanumeric, and only
+// ASCII alphanumeric, '.', '_', or '-'), rejecting writes when the plugin's
+// secret access is read-only or outside its allowed prefix scope.
 func (c *HostServiceClient) SetSecret(ctx context.Context, name, value string) error {
 	resp, err := c.client.SetSecret(ctx, &proto.SetSecretRequest{Name: name, Value: value})
 	if err != nil {
@@ -49,7 +116,13 @@ func (c *HostServiceClient) SetSecret(ctx context.Context, name, value string) e
 	return nil
 }
 
-// DeleteSecret removes a secret from the host's secret store.
+// DeleteSecret removes a secret from the host's secret store. Deleting a
+// non-existent secret is a no-op when name is valid and permitted.
+//
+// The host validates name at the RPC layer with ValidateHostSecretName and at
+// the backing store layer (1..255 bytes, leading ASCII alphanumeric, and only
+// ASCII alphanumeric, '.', '_', or '-'), rejecting deletes when the plugin's
+// secret access is read-only or outside its allowed prefix scope.
 func (c *HostServiceClient) DeleteSecret(ctx context.Context, name string) error {
 	resp, err := c.client.DeleteSecret(ctx, &proto.DeleteSecretRequest{Name: name})
 	if err != nil {
@@ -61,7 +134,14 @@ func (c *HostServiceClient) DeleteSecret(ctx context.Context, name string) error
 	return nil
 }
 
-// ListSecrets lists secret names from the host's secret store.
+// ListSecrets lists secret names from the host's secret store matching pattern.
+//
+// IMPORTANT: pattern is an unanchored Go regular expression compiled by the
+// host with regexp.Compile (at most MaxHostSecretPatternLength bytes), NOT a
+// shell glob. An empty pattern ("") returns all secret names visible to the
+// plugin; otherwise "." matches any character and "*" quantifies the preceding
+// token. To list secrets under a literal key prefix (for example
+// "scafctl.auth.myhandler.token."), prefer ListSecretsByPrefix.
 func (c *HostServiceClient) ListSecrets(ctx context.Context, pattern string) ([]string, error) {
 	resp, err := c.client.ListSecrets(ctx, &proto.ListSecretsRequest{Pattern: pattern})
 	if err != nil {
@@ -71,6 +151,66 @@ func (c *HostServiceClient) ListSecrets(ctx context.Context, pattern string) ([]
 		return nil, fmt.Errorf("host ListSecrets: %s", resp.Error)
 	}
 	return resp.Names, nil
+}
+
+// ListSecretsByPrefix lists secret names from the host's secret store that
+// start with the literal string prefix.
+//
+// Prefix must not exceed MaxHostSecretNameLength bytes. When prefix is
+// non-empty, ListSecretsByPrefix builds a "^"-anchored regular expression
+// escaping metacharacters via regexp.QuoteMeta (bounded to
+// MaxHostSecretPatternLength bytes at a complete rune/escape boundary when
+// QuoteMeta expansion crosses the pattern limit) and filters the returned
+// slice with strings.HasPrefix as defense in depth. When prefix is empty, all
+// visible secret names are returned.
+func (c *HostServiceClient) ListSecretsByPrefix(ctx context.Context, prefix string) ([]string, error) {
+	if len(prefix) > MaxHostSecretNameLength {
+		return nil, fmt.Errorf(
+			"host ListSecretsByPrefix: prefix length %d exceeds maximum of %d bytes",
+			len(prefix),
+			MaxHostSecretNameLength,
+		)
+	}
+	pattern := escapedPrefixPattern(prefix)
+	names, err := c.ListSecrets(ctx, pattern)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]string, 0, len(names))
+	for _, name := range names {
+		if strings.HasPrefix(name, prefix) {
+			filtered = append(filtered, name)
+		}
+	}
+	return filtered, nil
+}
+
+func escapedPrefixPattern(prefix string) string {
+	if prefix == "" {
+		return ""
+	}
+	if pattern := "^" + regexp.QuoteMeta(prefix); len(pattern) <= MaxHostSecretPatternLength {
+		return pattern
+	}
+	var b strings.Builder
+	b.Grow(MaxHostSecretPatternLength)
+	b.WriteByte('^')
+	for i := 0; i < len(prefix); {
+		r, width := utf8.DecodeRuneInString(prefix[i:])
+		if r == utf8.RuneError && width == 1 {
+			break
+		}
+		quoted := regexp.QuoteMeta(prefix[i : i+width])
+		if b.Len()+len(quoted) > MaxHostSecretPatternLength {
+			break
+		}
+		b.WriteString(quoted)
+		i += width
+	}
+	if b.Len() == 1 {
+		return ""
+	}
+	return b.String()
 }
 
 // GetAuthIdentity retrieves identity claims from the host's auth registry.
